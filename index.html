@@ -500,6 +500,21 @@ const KINDS = {team:'Team meeting / project', pto:'PTO', bank:'Bank Day'};
 const kindOf = v => v.facilityId ? '' : (v.kind || 'team');
 // What managers and facilities see: a Bank Day is just PTO to them
 const outLabel = v => kindOf(v)==='bank' ? 'PTO' : visitLabel(v);
+// Bank Days: at most two per calendar month, counting each weekday (not weekends or holidays) an entry covers
+const BANK_LIMIT = 2, BANK_LIMIT_MSG = 'Only two bank days may be used in a calendar month';
+function bankDaysUsed(entries){
+  const used = {};
+  entries.filter(v => kindOf(v)==='bank').forEach(v => {
+    for(let d = v.date; d <= endOf(v); d = addDays(d, 1))
+      if(!isWeekend(d) && !holidayOn(d)) used[d.slice(0,7)] = (used[d.slice(0,7)]||0) + 1;
+  });
+  return used;
+}
+// Would saving `entry` (new or changed) push any month it touches past the limit?
+function bankLimitOk(entry){
+  const used = bankDaysUsed(db.visits.filter(v => v.id!==entry.id).concat([entry]));
+  return Object.keys(bankDaysUsed([entry])).every(m => used[m] <= BANK_LIMIT);
+}
 const visitLabel = v => v.facilityId ? (fac(v.facilityId)||{name:'(deleted facility)'}).name : (v.label||'Other');
 const byName = (a,b) => a.name.localeCompare(b.name);
 function typeInfo(t){
@@ -677,6 +692,7 @@ function dropOn(date, item){
     openVisit(null, {facilityId:'', kind:'team', date, endDate:date, status:'planned'});
     return;
   }
+  if(item.kind==='bank' && !bankLimitOk({id:'new', facilityId:'', kind:'bank', date, endDate:''})){ alert(BANK_LIMIT_MSG); return; }
   if(item.kind==='pto' || item.kind==='bank'){
     const booked = db.visits.filter(v => v.facilityId && v.date===date);
     if(booked.length && !confirm(fmtDay(date)+' already has '+booked.map(visitLabel).join(', ')+'. Add '+KINDS[item.kind]+' anyway?')) return;
@@ -694,8 +710,10 @@ function dropOn(date, item){
       v.date = date;
     }else{
       const len = daysBetween(v.date, endOf(v));
-      v.date = date;
-      if(v.endDate) v.endDate = addDays(date, len);
+      const moved = Object.assign({}, v, {date, endDate: v.endDate ? addDays(date, len) : ''});
+      if(kindOf(v)==='bank' && !bankLimitOk(moved)){ alert(BANK_LIMIT_MSG); return; }
+      v.date = moved.date;
+      v.endDate = moved.endDate;
     }
     save(); toast('Moved to '+fmtDay(date));
     return;
@@ -922,6 +940,7 @@ visitForm.addEventListener('submit', e => {
   const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
     endDate:isFac?'':f.endDate.value, status:isFac?f.status.value:'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
   if(!isFac) data.kind = editingVisit ? kindOf(editingVisit) : newKind;
+  if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ alert(BANK_LIMIT_MSG); return; }
   if(editingVisit) Object.assign(editingVisit, data); else db.visits.push(Object.assign({id:uid()}, data));
   visitDlg.close(); save();
 });
