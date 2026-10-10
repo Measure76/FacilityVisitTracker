@@ -452,6 +452,9 @@ const endOf = v => (!v.facilityId && v.endDate && v.endDate>v.date) ? v.endDate 
 const overlaps = (v, a, b) => v.date<b && endOf(v)>=a;   // b exclusive
 const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const isOffice = d => S().officeDay>=0 && parse(d).getDay()===S().officeDay;
+// The office day as it actually happens: not on a holiday, and not when a team event,
+// PTO or Bank Day covers it or a facility visit is booked
+const officeHappens = d => isOffice(d) && !holidayOn(d) && !blockOn(d) && !db.visits.some(v => v.facilityId && v.date===d);
 const blockOn = d => db.visits.find(v => !v.facilityId && v.date<=d && endOf(v)>=d);
 function whenText(v){
   const e = endOf(v);
@@ -669,7 +672,7 @@ function renderSchedule(){
     h += `<div class="wk">Week of ${fmt(addDays(ws,1))} · ${cap.avail===0 ? 'no visit days available' : cap.used+' of '+cap.avail+' visit day'+(cap.avail===1?'':'s')+' used'}</div>`;
     for(let i=0; i<7; i++){
       const d = addDays(ws, i), wd = parse(d).getDay();
-      const hol = holidayOn(d), weekend = wd===0 || wd===6, office = !hol && !weekend && isOffice(d);
+      const hol = holidayOn(d), weekend = wd===0 || wd===6, office = !weekend && officeHappens(d);
       const cls = ['day', weekend?'weekend':'', office?'office':'', hol?'holiday':'', d<t?'past':'', d===t?'today':''].filter(Boolean).join(' ');
       const num = (i===0 && w===0) || d.endsWith('-01') ? fmt(d) : String(parse(d).getDate());
       const tag = hol || (office ? 'Office day' : '');
@@ -858,12 +861,15 @@ function emailText(){
   const lines = [];
   lines.push('Planned visits' + (s.yourName ? ' – '+s.yourName : ''));
   lines.push(fmt(addDays(r.start,1),{month:'short',day:'numeric'})+' – '+fmt(addDays(r.end,-2),{month:'short',day:'numeric',year:'numeric'})+' (subject to change)');
-  if(s.officeDay>=0) lines.push(DAYS[s.officeDay]+'s are office days.');
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7), we = addDays(ws,7);
     lines.push('', 'Week of '+fmt(addDays(ws,1)));
     const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+whenText(v)+' – '+outLabel(v)]);
-    for(let i=1; i<=5; i++){ const d = addDays(ws, i), hol = holidayOn(d); if(hol) rows.push([d, '  '+fmtDay(d)+' – '+hol+' (holiday)']); }
+    for(let i=1; i<=5; i++){
+      const d = addDays(ws, i), hol = holidayOn(d);
+      if(hol) rows.push([d, '  '+fmtDay(d)+' – '+hol+' (holiday)']);
+      else if(officeHappens(d)) rows.push([d, '  '+fmtDay(d)+' – Office day']);
+    }
     rows.sort((a,b) => a[0].localeCompare(b[0]));
     if(!rows.length) lines.push('  No visits scheduled');
     rows.forEach(x => lines.push(x[1]));
