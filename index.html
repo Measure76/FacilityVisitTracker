@@ -51,7 +51,8 @@ label.check{display:flex;gap:8px;align-items:center;color:var(--text);font-size:
 .chip b{display:block;font-size:22px;line-height:1.1}
 .chip.red b{color:var(--red)} .chip.amber b{color:var(--amber)} .chip.blue b{color:var(--blue)}
 .card{background:var(--panel);border:1px solid var(--border);border-left:5px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px}
-.card.overdue,.card.never{border-left-color:var(--red)} .card.soon{border-left-color:var(--amber)} .card.ok{border-left-color:var(--green)}
+.card.overdue,.card.never{border-left-color:var(--red)} .card.soon{border-left-color:var(--amber)} .card.ok{border-left-color:var(--green)} .card.ancillary{border-left-color:var(--border)}
+.badge.ancillary{background:var(--gray-bg);color:var(--muted);cursor:help}
 .card-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
 .fname{font-weight:600}
 .meta{display:flex;flex-wrap:wrap;gap:4px 18px;margin:6px 0;font-size:14px}
@@ -98,7 +99,7 @@ body[data-tab=schedule] .wrap{max-width:1240px}
   .side .pchip .sub{display:inline;margin-left:4px}
 }
 .pchip{font:inherit;font-size:13px;border:1px solid var(--border);border-left:4px solid var(--green);border-radius:6px;padding:4px 8px;background:var(--panel);color:var(--text);cursor:grab;user-select:none;-webkit-user-select:none}
-.pchip.overdue,.pchip.never{border-left-color:var(--red)} .pchip.soon{border-left-color:var(--amber)}
+.pchip.overdue,.pchip.never{border-left-color:var(--red)} .pchip.soon{border-left-color:var(--amber)} .pchip.ancillary{border-left-color:var(--muted)}
 .pchip .sub{color:var(--muted);font-size:11px;margin-left:4px}
 .pchip.booked{opacity:.45}
 .pchip.team{border-left-color:var(--blue);background:var(--blue-bg)}
@@ -183,6 +184,7 @@ body.placing .day{cursor:copy}
     </label>
     <div id="lookupMsg" class="small muted" style="margin-bottom:10px"></div>
     <label>Type<select name="type"></select></label>
+    <label class="check"><input type="checkbox" name="ancillary"> <span title="This facility does not need regular visits" style="cursor:help;border-bottom:1px dotted var(--muted)">Ancillary</span></label>
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
     <div class="dlg-actions">
       <button type="button" class="danger" data-act="delete-fac" id="facDel">Delete</button>
@@ -512,6 +514,7 @@ function weekCapacity(ws){
   return {avail, used: used.size};
 }
 // Non-facility entries: team meetings/projects, PTO and Bank Days (older entries have no kind = team)
+const ANC_TIP = 'This facility does not need regular visits';
 const KINDS = {team:'Team meeting / project', pto:'PTO', bank:'Bank Day'};
 const kindOf = v => v.facilityId ? '' : (v.kind || 'team');
 // What managers and facilities see: a Bank Day is just PTO to them
@@ -557,21 +560,23 @@ function facilityStatus(f){
   const planned = mine.filter(v => v.date>t).map(v => v.date).sort();
   const info = typeInfo(f.type);
   const last = done.length ? done[done.length-1] : null;
-  const due = last ? addDays(last, info.weeks*7) : null;
+  const due = last && !f.ancillary ? addDays(last, info.weeks*7) : null;   // ancillary: no regular visits, so never due
   const next = planned[0] || null;
   const daysLeft = due ? daysBetween(t, due) : null;
-  const level = !last ? 'never' : daysLeft<0 ? 'overdue' : daysLeft<=S().soonDays ? 'soon' : 'ok';
+  const level = f.ancillary ? 'ancillary' : !last ? 'never' : daysLeft<0 ? 'overdue' : daysLeft<=S().soonDays ? 'soon' : 'ok';
   const planLate = !!(next && due && next>due);
-  const needsPlan = level!=='ok' && (!next || planLate);
+  const needsPlan = level!=='ok' && level!=='ancillary' && (!next || planLate);
   return {f, info, last, due, next, daysLeft, level, planLate, needsPlan};
 }
 function allStatus(){
   return db.facilities.map(facilityStatus).sort((a,b) => {
+    if(!!a.f.ancillary !== !!b.f.ancillary) return a.f.ancillary ? 1 : -1;   // ancillary always last
     const ka = a.daysLeft==null ? -1e9 : a.daysLeft, kb = b.daysLeft==null ? -1e9 : b.daysLeft;
     return ka-kb || a.f.name.localeCompare(b.f.name);
   });
 }
 function statusText(r){
+  if(r.level==='ancillary') return 'Ancillary';
   if(r.level==='never') return 'No visits logged';
   if(r.daysLeft<0) return (-r.daysLeft)+' day'+(r.daysLeft===-1?'':'s')+' overdue';
   if(r.daysLeft===0) return 'Due today';
@@ -594,13 +599,13 @@ function renderStatus(){
   h += rows.map(r => `
     <div class="card ${r.level}">
       <div class="card-top">
-        <div><div class="fname">${esc(r.f.name)}</div><div class="muted small">${r.f.type==='remote'?'<span class="badge fly">Fly</span> ':''}${esc(r.info.long)}</div></div>
-        <span class="badge ${r.level}">${statusText(r)}</span>
+        <div><div class="fname">${esc(r.f.name)}</div><div class="muted small">${r.f.type==='remote'?'<span class="badge fly">Fly</span> ':''}${r.f.ancillary ? 'No regular visits' : esc(r.info.long)}</div></div>
+        <span class="badge ${r.level}"${r.f.ancillary?` title="${ANC_TIP}"`:''}>${statusText(r)}</span>
       </div>
       <div class="meta">
         <span>Last visit: <b>${r.last ? fmt(r.last)+'</b> ('+ago(daysBetween(r.last,today()))+')' : '</b>none'}</span>
         ${r.due ? `<span>Due by: <b>${fmt(r.due)}</b></span>` : ''}
-        <span>Next planned: ${r.next ? `<b>${fmt(r.next)}</b>${r.planLate?' <span class="warn">(after due date)</span>':''}` : (r.level!=='ok' ? '<span class="warn">not scheduled</span>' : '<span class="muted">not scheduled</span>')}</span>
+        <span>Next planned: ${r.next ? `<b>${fmt(r.next)}</b>${r.planLate?' <span class="warn">(after due date)</span>':''}` : (r.level!=='ok' && r.level!=='ancillary' ? '<span class="warn">not scheduled</span>' : '<span class="muted">not scheduled</span>')}</span>
       </div>
       <div class="actions">
         <button class="small" data-act="new-visit" data-fid="${r.f.id}" data-status="planned">Plan visit</button>
@@ -652,10 +657,10 @@ function renderSchedule(){
 
   // Sidebar: every facility, longest since last visit first (never visited at the top);
   // colored by due status and dimmed once a visit is booked in time
-  const byLast = allStatus().sort((a,b) => (a.last||'').localeCompare(b.last||'') || a.f.name.localeCompare(b.f.name));
+  const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || (a.last||'').localeCompare(b.last||'') || a.f.name.localeCompare(b.f.name));
   const chips = byLast.map(st => {
     const booked = st.next && !st.planLate;
-    const sub = st.last ? 'last visit '+ago(daysBetween(st.last, today())) : 'never visited';
+    const sub = (st.f.ancillary ? 'ancillary · ' : '') + (st.last ? 'last visit '+ago(daysBetween(st.last, today())) : 'never visited');
     const armed = placing && placing.kind==='fac' && placing.fid===st.f.id;
     return `<button class="pchip ${st.level}${booked?' booked':''}${armed?' armed':''}" draggable="true" data-drag="fac" data-fid="${st.f.id}" data-act="arm"
       title="${esc(statusText(st))}${st.next?' · next planned '+fmt(st.next):''}">${esc(st.f.name)}${st.f.type==='remote'?' ✈':''}<span class="sub">${sub}</span></button>`;
@@ -806,7 +811,7 @@ function renderFacilities(){
   const fs = db.facilities.slice().sort(byName);
   return `<div class="toolbar"><button class="primary" data-act="add-fac">+ Add facility</button><button data-act="add-batch">+ Add several</button></div>
     <div class="list">${fs.length ? fs.map(f=>`<div class="item">
-      <span class="what"><b>${esc(f.name)}</b> ${f.type==='remote'?'<span class="badge fly">Fly</span>':''}
+      <span class="what"><b>${esc(f.name)}</b> ${f.type==='remote'?'<span class="badge fly">Fly</span>':''}${f.ancillary?` <span class="badge ancillary" title="${ANC_TIP}">Ancillary</span>`:''}
         ${f.business?`<div class="small">${esc(f.business)}</div>`:''}
         <div class="muted small">${esc(f.address||'No address')} · ${esc(typeInfo(f.type).long)}</div>
         ${f.notes?`<div class="muted small">${esc(f.notes)}</div>`:''}</span>
@@ -968,6 +973,7 @@ function openFac(f){
   facForm.business.value = f ? f.business||'' : '';
   facForm.address.value = f ? f.address||'' : '';
   facForm.type.value = f ? f.type : 'local';
+  facForm.ancillary.checked = !!(f && f.ancillary);
   facForm.notes.value = f ? f.notes||'' : '';
   document.getElementById('facTitle').textContent = f ? 'Edit facility' : 'Add facility';
   document.getElementById('facDel').hidden = !f;
@@ -1057,7 +1063,7 @@ batchForm.addEventListener('submit', e => {
 });
 facForm.addEventListener('submit', e => {
   e.preventDefault();
-  const data = {name:facForm.name.value.trim(), business:facForm.business.value.trim(), address:facForm.address.value.trim(), type:facForm.type.value, notes:facForm.notes.value.trim()};
+  const data = {name:facForm.name.value.trim(), business:facForm.business.value.trim(), address:facForm.address.value.trim(), type:facForm.type.value, ancillary:facForm.ancillary.checked, notes:facForm.notes.value.trim()};
   if(!data.name) return;
   if(editingFac) Object.assign(editingFac, data); else db.facilities.push(Object.assign({id:uid()}, data));
   facDlg.close(); save();
