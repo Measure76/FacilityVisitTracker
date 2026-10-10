@@ -1,0 +1,15 @@
+# Deploy from this folder with:  npx wrangler@4 deploy
+# Secrets (GOOGLE_API_KEY, TEAM_PASSCODE) are set with `wrangler secret put` and never stored here.
+name = "facility-lookup"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+preview_urls = false
+
+# ALLOWED_ORIGINS was set in the Cloudflare dashboard; keep it rather than wipe it on deploy
+keep_vars = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "facility-tracker"
+database_id = "ad1ec226-c72c-4850-9be5-3c221431edfd"

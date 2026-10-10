@@ -1,3 +1,6 @@
 # Local notes; may contain secrets. Never publish.
 worker/SETUP.md
 *.txt
+
+# Wrangler local cache (account info, temp build files)
+.wrangler/
