@@ -12,11 +12,11 @@ A single-page app for planning and logging facility visits.
 
 ## Server
 
-Data storage and Google lookups go through a Cloudflare Worker ([worker/worker.js](worker/worker.js)), which holds the Google Places API key, the team passcode and a D1 database. The comments at the top of that file list its settings. The Worker's address is set in `SERVER_URL` at the top of `index.html`.
+Data storage and Google lookups go through a Cloudflare Worker ([worker/worker.js](worker/worker.js)), which holds the Google Places API key, an optional team passcode and a D1 database. The comments at the top of that file list its settings. The Worker's address is set in `SERVER_URL` at the top of `index.html`.
 
 ## Your data
 
-Each person signs in with the team passcode and their name. Their tracker is saved automatically to the team server, so it's available on any device and survives a cleared browser. The browser keeps a copy so unsaved changes survive a dropped connection. **Data & settings → Export** saves a copy as a file at any time.
+Each person signs in by picking their name (or entering it the first time). If a team passcode is set on the server, they enter that once per browser first. Their tracker is saved automatically to the team server, so it's available on any device and survives a cleared browser. The browser keeps a copy so unsaved changes survive a dropped connection. **Data & settings → Export** saves a copy as a file at any time.
 
 ## Hosting on GitHub Pages
 

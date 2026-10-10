@@ -318,14 +318,6 @@ async function showSignIn(msg){
   document.body.classList.add('signed-out');
   document.getElementById('banner').innerHTML = '';
   const view = document.getElementById('view');
-  if(!session.passcode){
-    view.innerHTML = `<form class="panel signin" id="pcForm">
-      <h2 style="margin-top:0">Welcome</h2>
-      <label>Team passcode<input name="pc" inputmode="numeric" autocomplete="off" required autofocus></label>
-      <button class="primary" type="submit">Continue</button>
-      <p class="small warn">${esc(msg||'')}</p></form>`;
-    return;
-  }
   view.innerHTML = `<div class="panel signin"><p class="muted">Loading names…</p></div>`;
   let users = [];
   try{
@@ -333,7 +325,17 @@ async function showSignIn(msg){
     if(!r.ok) throw new Error(await errorText(r));
     users = (await r.json()).users;
   }catch(e){
-    if(e.code===401){ session = {}; writeJson(SESSION_KEY, session); return showSignIn('That passcode isn’t right.'); }
+    // 401: the server has a team passcode set (TEAM_PASSCODE) and we don't have the right one
+    if(e.code===401){
+      if(session.passcode) msg = 'That passcode isn’t right.';
+      session = {user: session.user}; writeJson(SESSION_KEY, session);
+      view.innerHTML = `<form class="panel signin" id="pcForm">
+        <h2 style="margin-top:0">Welcome</h2>
+        <label>Team passcode<input name="pc" inputmode="numeric" autocomplete="off" required autofocus></label>
+        <button class="primary" type="submit">Continue</button>
+        <p class="small warn">${esc(msg||'')}</p></form>`;
+      return;
+    }
     view.innerHTML = `<div class="panel signin"><p class="warn">${esc(e.message)}</p><button data-act="retry-signin">Try again</button></div>`;
     return;
   }
@@ -912,7 +914,7 @@ window.addEventListener('online', () => { if(sync.dirty) push(); });
 document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshFromServer(); });
 window.addEventListener('beforeunload', e => { if(sync.dirty){ e.preventDefault(); e.returnValue = ''; } });
 
-if(session.passcode && session.user) loadUser(); else showSignIn();
+if(session.user) loadUser(); else showSignIn();
 </script>
 </body>
 </html>

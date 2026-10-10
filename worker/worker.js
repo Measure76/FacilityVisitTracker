@@ -1,16 +1,17 @@
 // Cloudflare Worker: the Facility Visit Tracker's server.
 //   - Stores each person's tracker data in a D1 database, keyed by their name
 //   - Looks up facility addresses with Google Places
-// Everything requires the team passcode. Secrets live only in Cloudflare, never in the web page or on GitHub.
+// When TEAM_PASSCODE is set, everything requires it; when it isn't, the server is open.
+// Secrets live only in Cloudflare, never in the web page or on GitHub.
 //
 // Settings (Cloudflare → Worker → Settings):
 //   GOOGLE_API_KEY   Secret       Google Places API (New) key
-//   TEAM_PASSCODE    Secret       Passcode everyone enters once per browser
+//   TEAM_PASSCODE    Secret       Optional. Passcode everyone enters once per browser
 //   ALLOWED_ORIGINS  Text         Comma-separated sites allowed to call this, e.g. https://yourname.github.io
 //                                 (add "null" temporarily to test from index.html opened straight from disk)
 //   DB               D1 binding   The database; tables are created automatically on first use
 //
-// Routes (all need header X-Team-Passcode):
+// Routes (all need header X-Team-Passcode when a passcode is set):
 //   GET  /users              → {users:[{name, updatedAt}]}
 //   GET  /data?user=NAME     → {name, data, version}   (404 if no such user)
 //   PUT  /data?user=NAME     body {data, baseVersion}  → {version}   (409 + {data, version} if changed elsewhere)
@@ -39,7 +40,6 @@ export default {
 
     try {
       if (!env.DB) return send({ error: 'Worker has no DB binding' }, 500);
-      if (!env.TEAM_PASSCODE) return send({ error: 'Worker has no TEAM_PASSCODE' }, 500);
       await ensureSchema(env.DB);
 
       const auth = await checkPasscode(request, env);
@@ -115,13 +115,16 @@ async function ensureSchema(db) {
 // Returns 'ok', 'bad' or 'locked'. Lockout is checked even for a correct passcode,
 // otherwise a locked-out guesser would still learn when they hit the right one.
 async function checkPasscode(request, env) {
+  if (!env.TEAM_PASSCODE) return 'ok';
+  const given = request.headers.get('X-Team-Passcode') || '';
+  if (!given) return 'bad';   // nothing entered yet; not a guess, so don't count it
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const hourAgo = Date.now() - 3600000;
   const counts = await env.DB.prepare(
     'SELECT SUM(ip = ?) AS mine, COUNT(*) AS total FROM auth_fail WHERE ts > ?').bind(ip, hourAgo).first();
   if ((counts.mine || 0) >= MAX_FAILS_PER_IP || (counts.total || 0) >= MAX_FAILS_TOTAL) return 'locked';
 
-  if (sameText(request.headers.get('X-Team-Passcode') || '', env.TEAM_PASSCODE)) return 'ok';
+  if (sameText(given, env.TEAM_PASSCODE)) return 'ok';
 
   await env.DB.batch([
     env.DB.prepare('INSERT INTO auth_fail (ip, ts) VALUES (?, ?)').bind(ip, Date.now()),
