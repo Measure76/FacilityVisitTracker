@@ -120,7 +120,6 @@ body.placing .day{cursor:copy}
 .day.holiday .dtag{color:var(--amber);font-weight:600}
 .ev{display:block;width:100%;margin-top:3px;padding:2px 5px;border:none;border-left:3px solid var(--accent);border-radius:4px;background:var(--blue-bg);color:var(--text);font:inherit;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .ev.done{border-left-color:var(--green);background:var(--green-bg);color:var(--green)}
-.ev.unconfirmed{border-left-color:var(--amber);background:var(--amber-bg);color:var(--amber)}
 .ev.team{border-left:none;background:var(--accent);color:var(--accent-text);border-radius:0;margin-left:-4px;margin-right:-4px;width:calc(100% + 8px);padding-left:9px}
 .ev.team.pto{background:var(--pto)} .ev.team.bank{background:var(--bank)}
 .pchip.pto{border-left-color:var(--pto)} .pchip.bank{border-left-color:var(--bank)}
@@ -155,9 +154,6 @@ body.placing .day{cursor:copy}
     <label>Where<select name="facilityId"></select></label>
     <label id="otherWrap">What is it?<input name="label" placeholder="Team meeting, team project, PTO…"></label>
     <label id="endWrap">Last day (for multi-day meetings and projects)<input type="date" name="endDate"></label>
-    <label id="statusWrap">Status
-      <select name="status"><option value="planned">Planned</option><option value="completed">Completed</option></select>
-    </label>
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
     <label class="check" id="concurWrap"><input type="checkbox" name="concur"> Entered in Concur</label>
     <div class="dlg-actions">
@@ -254,6 +250,7 @@ function saveUi(){ writeJson(UIKEY, ui); }
 const cacheKey = () => CACHE_PREFIX + (session.user||'').toLowerCase();
 function writeCache(){ writeJson(cacheKey(), {data:db, version:sync.version, dirty:sync.dirty}); }
 function save(){
+  db.visits.forEach(v => { v.status = v.facilityId ? statusByDate(v.date) : 'planned'; });
   sync.dirty = true;
   writeCache();
   render();
@@ -555,8 +552,8 @@ function download(name, text, type){
 function facilityStatus(f){
   const t = today();
   const mine = db.visits.filter(v => v.facilityId===f.id);
-  const done = mine.filter(v => v.status==='completed' && v.date<=t).map(v => v.date).sort();
-  const planned = mine.filter(v => v.status==='planned' && v.date>=t).map(v => v.date).sort();
+  const done = mine.filter(v => v.date<=t).map(v => v.date).sort();
+  const planned = mine.filter(v => v.date>t).map(v => v.date).sort();
   const info = typeInfo(f.type);
   const last = done.length ? done[done.length-1] : null;
   const due = last ? addDays(last, info.weeks*7) : null;
@@ -579,20 +576,20 @@ function statusText(r){
   if(r.daysLeft===0) return 'Due today';
   return 'Due in '+r.daysLeft+' day'+(r.daysLeft===1?'':'s');
 }
-const pastPlanned = () => db.visits.filter(v => v.facilityId && v.status==='planned' && v.date<today()).sort((a,b)=>a.date.localeCompare(b.date));
+// A facility visit's status follows its date: today or earlier happened, later is planned
+const statusByDate = d => d <= today() ? 'completed' : 'planned';
+const isDone = v => v.date <= today();
 
 // ---------- views ----------
 function renderStatus(){
   if(!db.facilities.length) return `<div class="panel">No facilities yet. <button class="primary" data-act="add-fac">Add your first facility</button></div>`;
   const rows = allStatus();
   const n = k => rows.filter(r => r.level===k).length;
-  const pend = pastPlanned().length;
   let h = `<div class="chips">
     <div class="chip red"><b>${n('overdue')+n('never')}</b>Overdue</div>
     <div class="chip amber"><b>${n('soon')}</b>Due within ${S().soonDays} days</div>
     <div class="chip blue"><b>${rows.filter(r=>r.needsPlan).length}</b>Due but not scheduled in time</div>
   </div>`;
-  if(pend) h += `<div class="banner">${pend} past planned visit${pend>1?'s':''} still need${pend>1?'':'s'} to be marked completed or rescheduled. <button class="small" data-act="tab" data-tab="schedule">Review</button></div>`;
   h += rows.map(r => `
     <div class="card ${r.level}">
       <div class="card-top">
@@ -615,7 +612,7 @@ function renderStatus(){
 function visitRow(v, opts){
   opts = opts || {};
   const f = v.facilityId ? fac(v.facilityId) : null;
-  const done = v.status==='completed';
+  const done = isDone(v);
   return `<div class="item ${done&&!opts.log?'done':''}">
     <span class="date">${whenText(v)}</span>
     <span class="what">${done&&!opts.log?'✓ ':''}${esc(visitLabel(v))}
@@ -623,10 +620,9 @@ function visitRow(v, opts){
       ${opts.log&&f&&f.address?`<div class="muted small">${esc(f.address)}</div>`:''}
       ${v.notes?`<div class="muted small">${esc(v.notes)}</div>`:''}</span>
     <span class="actions">
-      ${opts.confirm?`<button class="small primary" data-act="complete" data-id="${v.id}">Completed</button>`:''}
       ${opts.log&&f&&f.address?`<button class="small" data-act="copy-addr" data-id="${v.id}">Copy address</button>`:''}
       ${opts.log?`<label class="check small" style="margin:0"><input type="checkbox" class="concur-cb" data-id="${v.id}" ${v.concur?'checked':''}> In Concur</label>`:''}
-      <button class="small" data-act="edit-visit" data-id="${v.id}">${opts.confirm?'Reschedule':'Edit'}</button>
+      <button class="small" data-act="edit-visit" data-id="${v.id}">Edit</button>
     </span>
   </div>`;
 }
@@ -652,10 +648,6 @@ function renderSchedule(){
     <button data-act="ics">Download calendar (.ics)</button>
   </div>`;
 
-  const pend = pastPlanned();
-  if(pend.length){
-    h += `<h2>Did these happen?</h2><div class="list">${pend.map(v=>visitRow(v,{confirm:true})).join('')}</div>`;
-  }
 
   // Sidebar: every facility, longest since last visit first (never visited at the top);
   // colored by due status and dimmed once a visit is booked in time
@@ -696,9 +688,9 @@ function renderSchedule(){
         return `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
       }).join('');
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
-        const f = fac(v.facilityId), done = v.status==='completed', unconf = !done && d<t;
-        return `<button class="ev${done?' done':''}${unconf?' unconfirmed':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
-          title="${esc(visitLabel(v))}${done?' · completed':unconf?' · did this happen?':' · planned'}">${done?'✓ ':unconf?'? ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
+        const f = fac(v.facilityId), done = d<=t;
+        return `<button class="ev${done?' done':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
+          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}">${done?'✓ ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
       }).join('');
       h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}</div>`;
     }
@@ -727,7 +719,6 @@ function dropOn(date, item){
     if(v.facilityId){
       const why = dayProblem(date);
       if(why && !confirm(fmtDay(date)+' '+why+'. Move the visit there anyway?')) return;
-      if(v.status==='completed' && date>today()) v.status = 'planned';
       v.date = date;
     }else{
       const len = daysBetween(v.date, endOf(v));
@@ -746,9 +737,9 @@ function dropOn(date, item){
   const why = dayProblem(date);
   if(why && !confirm(fmtDay(date)+' '+why+'. Book '+f.name+' anyway?')) return;
   const past = date < today();
-  if(past && !confirm(fmtDay(date)+' is in the past. Log it as a completed visit to '+f.name+'?')) return;
-  db.visits.push({id:uid(), facilityId:f.id, date, status: past?'completed':'planned', notes:'', label:'', endDate:'', concur:false});
-  save(); toast((past?'Logged ':'Booked ')+f.name+' on '+fmtDay(date));
+  if(past && !confirm(fmtDay(date)+' is in the past. Record a completed visit to '+f.name+' that day?')) return;
+  db.visits.push({id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false});
+  save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date));
 }
 function setPlacing(p){
   placing = p;
@@ -792,7 +783,7 @@ function logRange(){
   return {from, to, open: !!ui.logOpen};
 }
 function logVisits(r){
-  return db.visits.filter(v => v.facilityId && v.status==='completed' && v.date>=r.from && v.date<=r.to && (!r.open || !v.concur))
+  return db.visits.filter(v => v.facilityId && isDone(v) && v.date>=r.from && v.date<=r.to && (!r.open || !v.concur))
     .sort((a,b)=>a.date.localeCompare(b.date));
 }
 function renderLog(){
@@ -873,7 +864,7 @@ function render(){
 // ---------- exports ----------
 function emailText(){
   const r = schedRange(), s = S();
-  const vs = rangeVisits(r).filter(v => !v.facilityId || v.status==='completed' || v.date>=today());
+  const vs = rangeVisits(r);
   const lines = [];
   lines.push('Planned visits' + (s.yourName ? ' – '+s.yourName : ''));
   lines.push(fmt(addDays(r.start,1),{month:'short',day:'numeric'})+' – '+fmt(addDays(r.end,-2),{month:'short',day:'numeric',year:'numeric'})+' (subject to change)');
@@ -928,8 +919,7 @@ function syncVisitForm(){
   const other = visitForm.facilityId.value==='';
   document.getElementById('otherWrap').hidden = !other;
   document.getElementById('endWrap').hidden = !other;
-  document.getElementById('statusWrap').hidden = other;
-  document.getElementById('concurWrap').hidden = other || visitForm.status.value!=='completed';
+  document.getElementById('concurWrap').hidden = other || !(visitForm.date.value && visitForm.date.value <= today());
 }
 function openVisit(v, defaults){
   editingVisit = v || null;
@@ -941,7 +931,6 @@ function openVisit(v, defaults){
   visitForm.facilityId.value = d.facilityId || '';
   visitForm.label.value = d.label || '';
   visitForm.endDate.value = d.endDate || '';
-  visitForm.status.value = d.status;
   visitForm.notes.value = d.notes || '';
   visitForm.concur.checked = !!d.concur;
   document.getElementById('visitTitle').textContent = v ? (v.facilityId ? 'Edit entry' : KINDS[kindOf(v)]) : !d.facilityId ? KINDS[newKind] : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
@@ -950,12 +939,11 @@ function openVisit(v, defaults){
   visitDlg.showModal();
 }
 visitForm.facilityId.addEventListener('change', syncVisitForm);
-visitForm.status.addEventListener('change', syncVisitForm);
+visitForm.date.addEventListener('change', syncVisitForm);
 visitForm.addEventListener('submit', e => {
   e.preventDefault();
   const f = visitForm;
   if(!f.date.value) return;
-  if(f.status.value==='completed' && f.date.value>today()){ alert('A completed visit can’t be in the future. Set it to Planned instead.'); return; }
   if(!f.facilityId.value && !f.label.value.trim()){ alert('Describe what this entry is (for example, Team meeting).'); return; }
   const isFac = !!f.facilityId.value;
   if(!isFac && f.endDate.value && f.endDate.value<f.date.value){ alert('The last day can’t be before the first day.'); return; }
@@ -964,7 +952,7 @@ visitForm.addEventListener('submit', e => {
     if(why && !confirm(fmtDay(f.date.value)+' '+why+'. Schedule the visit anyway?')) return;
   }
   const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
-    endDate:isFac?'':f.endDate.value, status:isFac?f.status.value:'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
+    endDate:isFac?'':f.endDate.value, status:isFac?statusByDate(f.date.value):'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
   if(!isFac) data.kind = editingVisit ? kindOf(editingVisit) : newKind;
   if(data.kind==='bank' && !bankSpanOk(data)){ alert(BANK_SPAN_MSG); return; }
   if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ alert(BANK_LIMIT_MSG); return; }
@@ -1099,7 +1087,7 @@ document.addEventListener('click', e => {
   switch(b.dataset.act){
     case 'tab': ui.tab = b.dataset.tab; saveUi(); render(); break;
     case 'close': b.closest('dialog').close(); break;
-    case 'new-visit': openVisit(null, {facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
+    case 'new-visit': openVisit(null, {date: b.dataset.status==='completed' ? today() : addDays(today(), 1), facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
     case 'arm': {
       const p = KINDS[b.dataset.drag] ? {kind:b.dataset.drag} : {kind:'fac', fid:b.dataset.fid};
@@ -1112,7 +1100,6 @@ document.addEventListener('click', e => {
     case 'delete-visit':
       if(editingVisit && confirm('Delete this entry?')){ db.visits = db.visits.filter(x => x!==editingVisit); visitDlg.close(); save(); }
       break;
-    case 'complete': v.status = 'completed'; save(); toast('Marked completed'); break;
     case 'copy-addr': copy(fac(v.facilityId).address); break;
     case 'add-fac': openFac(null); break;
     case 'add-batch': openBatch(); break;
