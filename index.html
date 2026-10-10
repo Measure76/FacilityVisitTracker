@@ -9,14 +9,14 @@
   --bg:#f5f6f8; --panel:#ffffff; --text:#1c2230; --muted:#5e6777; --border:#d8dce3;
   --accent:#2457c5; --accent-text:#ffffff;
   --red:#b42318; --red-bg:#fdeceb; --amber:#8a5a00; --amber-bg:#fff4d8;
-  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3;
+  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3; --pto:#7a4fc0; --bank:#0f7f7a;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#13161b; --panel:#1c2027; --text:#e6e9ee; --muted:#9aa3b2; --border:#323843;
     --accent:#6f9cff; --accent-text:#0b1020;
     --red:#ff8f85; --red-bg:#3b1f1d; --amber:#f2c065; --amber-bg:#3a3018;
-    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33;
+    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33; --pto:#b796f0; --bank:#5cc8c0;
   }
 }
 *{box-sizing:border-box}
@@ -84,7 +84,7 @@ dialog h2{margin-top:0}
 textarea.out{width:100%;height:300px;font:13px/1.4 ui-monospace,Consolas,monospace}
 .palette{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 6px}
 body[data-tab=schedule] .wrap{max-width:1240px}
-.sched{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;align-items:start;margin-top:16px}
+.sched{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;align-items:start;margin-top:12px}
 .side{position:sticky;top:8px;max-height:calc(100vh - 16px);overflow-y:auto}
 .side h3{margin-top:0}
 .side .palette{flex-direction:column;flex-wrap:nowrap;margin:0 0 8px}
@@ -122,6 +122,9 @@ body.placing .day{cursor:copy}
 .ev.done{border-left-color:var(--green);background:var(--green-bg);color:var(--green)}
 .ev.unconfirmed{border-left-color:var(--amber);background:var(--amber-bg);color:var(--amber)}
 .ev.team{border-left:none;background:var(--accent);color:var(--accent-text);border-radius:0;margin-left:-4px;margin-right:-4px;width:calc(100% + 8px);padding-left:9px}
+.ev.team.pto{background:var(--pto)} .ev.team.bank{background:var(--bank)}
+.pchip.pto{border-left-color:var(--pto)} .pchip.bank{border-left-color:var(--bank)}
+.quick{margin:16px 0 0}
 .ev.team.first{border-radius:4px 0 0 4px;margin-left:0;width:calc(100% + 4px);padding-left:5px}
 .ev.team.last{border-radius:0 4px 4px 0;margin-right:0;width:calc(100% + 4px)}
 .ev.team.first.last{border-radius:4px;width:100%}
@@ -492,6 +495,11 @@ function weekCapacity(ws){
   }
   return {avail, used: used.size};
 }
+// Non-facility entries: team meetings/projects, PTO and Bank Days (older entries have no kind = team)
+const KINDS = {team:'Team meeting / project', pto:'PTO', bank:'Bank Day'};
+const kindOf = v => v.facilityId ? '' : (v.kind || 'team');
+// What managers and facilities see: a Bank Day is just PTO to them
+const outLabel = v => kindOf(v)==='bank' ? 'PTO' : visitLabel(v);
 const visitLabel = v => v.facilityId ? (fac(v.facilityId)||{name:'(deleted facility)'}).name : (v.label||'Other');
 const byName = (a,b) => a.name.localeCompare(b.name);
 function typeInfo(t){
@@ -623,12 +631,12 @@ function renderSchedule(){
     return `<button class="pchip ${st.level}${booked?' booked':''}${armed?' armed':''}" draggable="true" data-drag="fac" data-fid="${st.f.id}" data-act="arm"
       title="${esc(statusText(st))}${st.next?' · next planned '+fmt(st.next):''}">${esc(st.f.name)}${st.f.type==='remote'?' ✈':''}<span class="sub">${sub}</span></button>`;
   }).join('');
-  const teamArmed = placing && placing.kind==='team';
-  h += `<div class="sched"><aside class="side">
+  const quick = ['team','pto','bank'].map(k =>
+    `<button class="pchip ${k==='team'?'team':'team '+k}${placing && placing.kind===k?' armed':''}" draggable="true" data-drag="${k}" data-act="arm">+ ${KINDS[k]}</button>`).join('');
+  h += `<div class="palette quick">${quick}</div>
+    <div class="sched"><aside class="side">
     <h3>Drag onto a day</h3>
-    <div class="palette">
-      <button class="pchip team${teamArmed?' armed':''}" draggable="true" data-drag="team" data-act="arm">+ Team meeting / project</button>
-      ${chips}</div>
+    <div class="palette">${chips}</div>
     <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
       : 'Drag onto a day, or tap and then tap a day. Click anything on the calendar to edit it.'}</p>
   </aside>`;
@@ -649,7 +657,7 @@ function renderSchedule(){
       const tag = hol || (office ? 'Office day' : '');
       const events = vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
         const first = v.date===d, lastDay = endOf(v)===d, label = first || (i===1 && v.date<ws) ? esc(visitLabel(v)) : '&nbsp;';
-        return `<button class="ev team${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
+        return `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
       }).join('');
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
         const f = fac(v.facilityId), done = v.status==='completed', unconf = !done && d<t;
@@ -663,10 +671,17 @@ function renderSchedule(){
 }
 
 // ---------- drag & drop / tap-to-place ----------
-let placing = null;   // {kind:'fac', fid} | {kind:'team'} while waiting for a day tap
+let placing = null;   // {kind:'fac', fid} | {kind:'team'|'pto'|'bank'} while waiting for a day tap
 function dropOn(date, item){
   if(item.kind==='team'){
-    openVisit(null, {facilityId:'', date, endDate:date, status:'planned'});
+    openVisit(null, {facilityId:'', kind:'team', date, endDate:date, status:'planned'});
+    return;
+  }
+  if(item.kind==='pto' || item.kind==='bank'){
+    const booked = db.visits.filter(v => v.facilityId && v.date===date);
+    if(booked.length && !confirm(fmtDay(date)+' already has '+booked.map(visitLabel).join(', ')+'. Add '+KINDS[item.kind]+' anyway?')) return;
+    db.visits.push({id:uid(), facilityId:'', kind:item.kind, label:KINDS[item.kind], date, endDate:'', status:'planned', notes:'', concur:false});
+    save(); toast(KINDS[item.kind]+' on '+fmtDay(date)+'. Click it to make it longer.');
     return;
   }
   if(item.kind==='visit'){
@@ -703,7 +718,8 @@ function setPlacing(p){
 document.addEventListener('dragstart', e => {
   const el = e.target.closest && e.target.closest('[data-drag]');
   if(!el) return;
-  const item = el.dataset.drag==='fac' ? {kind:'fac', fid:el.dataset.fid} : el.dataset.drag==='team' ? {kind:'team'} : {kind:'visit', id:el.dataset.id};
+  const k = el.dataset.drag;
+  const item = k==='fac' ? {kind:'fac', fid:el.dataset.fid} : KINDS[k] ? {kind:k} : {kind:'visit', id:el.dataset.id};
   e.dataTransfer.setData('text/plain', JSON.stringify(item));
   e.dataTransfer.effectAllowed = item.kind==='visit' ? 'move' : 'copy';
 });
@@ -824,7 +840,7 @@ function emailText(){
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7), we = addDays(ws,7);
     lines.push('', 'Week of '+fmt(addDays(ws,1)));
-    const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+whenText(v)+' – '+visitLabel(v)]);
+    const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+whenText(v)+' – '+outLabel(v)]);
     for(let i=1; i<=5; i++){ const d = addDays(ws, i), hol = holidayOn(d); if(hol) rows.push([d, '  '+fmtDay(d)+' – '+hol+' (holiday)']); }
     rows.sort((a,b) => a[0].localeCompare(b[0]));
     if(!rows.length) lines.push('  No visits scheduled');
@@ -841,7 +857,7 @@ function icsFile(){
     const f = v.facilityId ? fac(v.facilityId) : null;
     out.push('BEGIN:VEVENT', 'UID:'+v.id+'@facility-visit-tracker', 'DTSTAMP:'+stamp,
       'DTSTART;VALUE=DATE:'+v.date.replace(/-/g,''), 'DTEND;VALUE=DATE:'+addDays(endOf(v),1).replace(/-/g,''),
-      'SUMMARY:'+icsEsc((s.yourName?s.yourName+': ':'')+visitLabel(v)+(v.facilityId?' (tentative)':'')));
+      'SUMMARY:'+icsEsc((s.yourName?s.yourName+': ':'')+outLabel(v)+(v.facilityId?' (tentative)':'')));
     if(f && f.address) out.push('LOCATION:'+icsEsc(f.address));
     if(v.notes) out.push('DESCRIPTION:'+icsEsc(v.notes));
     out.push('TRANSP:TRANSPARENT','END:VEVENT');
@@ -862,7 +878,7 @@ function csvFile(){
 // ---------- dialogs ----------
 const visitDlg = document.getElementById('visitDlg'), visitForm = document.getElementById('visitForm');
 const facDlg = document.getElementById('facDlg'), facForm = document.getElementById('facForm');
-let editingVisit = null, editingFac = null;
+let editingVisit = null, editingFac = null, newKind = 'team';
 
 function syncVisitForm(){
   const other = visitForm.facilityId.value==='';
@@ -873,6 +889,7 @@ function syncVisitForm(){
 }
 function openVisit(v, defaults){
   editingVisit = v || null;
+  newKind = (defaults && defaults.kind) || 'team';
   const d = v || Object.assign({date: today(), facilityId: '', status: 'planned', notes: '', label: '', endDate: '', concur: false}, defaults);
   const opts = db.facilities.slice().sort(byName).map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('');
   visitForm.facilityId.innerHTML = opts + '<option value="">Other (team meeting, project, PTO…)</option>';
@@ -883,7 +900,7 @@ function openVisit(v, defaults){
   visitForm.status.value = d.status;
   visitForm.notes.value = d.notes || '';
   visitForm.concur.checked = !!d.concur;
-  document.getElementById('visitTitle').textContent = v ? 'Edit entry' : !d.facilityId ? 'Team meeting / project' : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
+  document.getElementById('visitTitle').textContent = v ? (v.facilityId ? 'Edit entry' : KINDS[kindOf(v)]) : !d.facilityId ? KINDS[newKind] : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
   document.getElementById('visitDel').hidden = !v;
   syncVisitForm();
   visitDlg.showModal();
@@ -904,6 +921,7 @@ visitForm.addEventListener('submit', e => {
   }
   const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
     endDate:isFac?'':f.endDate.value, status:isFac?f.status.value:'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
+  if(!isFac) data.kind = editingVisit ? kindOf(editingVisit) : newKind;
   if(editingVisit) Object.assign(editingVisit, data); else db.visits.push(Object.assign({id:uid()}, data));
   visitDlg.close(); save();
 });
@@ -1015,7 +1033,7 @@ document.addEventListener('click', e => {
     case 'new-visit': openVisit(null, {facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
     case 'arm': {
-      const p = b.dataset.drag==='team' ? {kind:'team'} : {kind:'fac', fid:b.dataset.fid};
+      const p = KINDS[b.dataset.drag] ? {kind:b.dataset.drag} : {kind:'fac', fid:b.dataset.fid};
       const same = placing && placing.kind===p.kind && placing.fid===p.fid;
       setPlacing(same ? null : p);
       break;
