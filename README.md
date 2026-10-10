@@ -8,11 +8,11 @@ A single-page app for planning and logging facility visits.
 
 ## Address lookup
 
-**Fill address** looks up the facility name and fills in the first address it finds. Out of the box it uses OpenStreetMap, which is free but misses many businesses. Google lookups go through a Cloudflare Worker that holds the Google Places API key (see the comments at the top of [worker/worker.js](worker/worker.js)). The Worker's address is set in `GOOGLE_LOOKUP_URL` at the top of `index.html`; leave it empty to use OpenStreetMap only.
+**Fill address** looks up the facility name and fills in the first address it finds. Out of the box it uses OpenStreetMap, which is free but misses many businesses. Google lookups and data storage go through a Cloudflare Worker that holds the Google Places API key, the team passcode and a D1 database (see the comments at the top of [worker/worker.js](worker/worker.js)). The Worker's address is set in `GOOGLE_LOOKUP_URL` at the top of `index.html`; leave it empty to use OpenStreetMap only.
 
-## Your data stays in your browser
+## Your data
 
-Nothing is uploaded. Facilities and visits are saved in the browser you use, on that computer only. Use **Data & settings → Export backup** regularly. Use the backup file to move your data to another computer or browser.
+Each person signs in with the team passcode and their name. Their tracker is saved automatically to the team server, so it's available on any device and survives a cleared browser. The browser keeps a copy so unsaved changes survive a dropped connection. **Data & settings → Export** saves a copy as a file at any time.
 
 ## Hosting on GitHub Pages
 

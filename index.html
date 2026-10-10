@@ -25,6 +25,11 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-a
 header h1{font-size:20px;margin:0 0 12px}
 nav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:16px}
 nav button{background:none;border:none;border-bottom:3px solid transparent;padding:8px 12px;color:var(--muted);font:inherit;cursor:pointer}
+header.top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+header.top h1{margin:0}
+.linkish{background:none;border:none;padding:0;color:var(--accent);cursor:pointer;font:inherit;text-decoration:underline}
+body.signed-out nav,body.signed-out #who{display:none}
+.signin{max-width:380px;margin:24px auto}
 nav button.on{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
 nav .count{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--red);color:var(--panel);font-size:12px;text-align:center}
 button,.btn{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer}
@@ -84,7 +89,8 @@ textarea.out{width:100%;height:300px;font:13px/1.4 ui-monospace,Consolas,monospa
 </head>
 <body>
 <div class="wrap">
-  <header><h1>Facility Visit Tracker</h1></header>
+  <header class="top"><h1>Facility Visit Tracker</h1>
+    <div id="who" class="small muted"></div></header>
   <nav id="tabs">
     <button data-tab="status">Status</button>
     <button data-tab="schedule">Schedule</button>
@@ -159,30 +165,222 @@ textarea.out{width:100%;height:300px;font:13px/1.4 ui-monospace,Consolas,monospa
 
 <script>
 'use strict';
-// Address of your Cloudflare Worker (see worker/worker.js), e.g. 'https://facility-lookup.yourname.workers.dev'.
-// Leave empty to use OpenStreetMap only.
-const GOOGLE_LOOKUP_URL = 'https://facility-lookup.measure-717.workers.dev';
+// The team server: a Cloudflare Worker (see worker/worker.js) that stores everyone's data and looks up addresses.
+const SERVER_URL = 'https://facility-lookup.measure-717.workers.dev';
 
 // ---------- storage ----------
-const KEY = 'facilityVisitTracker.v1';
+// The server holds the real copy. This browser keeps a cache so the app opens instantly
+// and unsaved changes survive a dropped connection or closed tab.
+const LEGACY_KEY = 'facilityVisitTracker.v1';          // data from before the server existed
+const SESSION_KEY = 'facilityVisitTracker.session';    // {passcode, user}
+const CACHE_PREFIX = 'facilityVisitTracker.cache.';    // + lowercased name → {data, version, dirty}
 const UIKEY = 'facilityVisitTracker.ui';
-function blank(){ return {facilities:[], visits:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:'', lastBackup:null}}; }
-function load(){
-  try{
-    const s = localStorage.getItem(KEY);
-    if(s){ const d = JSON.parse(s); const b = blank();
-      return {facilities:d.facilities||[], visits:d.visits||[], settings:Object.assign(b.settings, d.settings||{})}; }
-  }catch(e){}
-  return blank();
+function blank(){ return {facilities:[], visits:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:''}}; }
+function normalize(d){
+  d = d || {};
+  return {facilities:d.facilities||[], visits:d.visits||[], settings:Object.assign(blank().settings, d.settings||{})};
 }
-let db = load();
-let ui = (()=>{ try{ return JSON.parse(localStorage.getItem(UIKEY))||{}; }catch(e){ return {}; } })();
-function saveUi(){ try{ localStorage.setItem(UIKEY, JSON.stringify(ui)); }catch(e){} }
+function readJson(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
+function writeJson(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
+
+let db = blank();
+let session = readJson(SESSION_KEY) || {};
+let ready = false;   // true once a user's data is loaded
+const sync = {version:0, dirty:false, inflight:false, state:'saved', error:'', retry:null, timer:null};
+let ui = readJson(UIKEY) || {};
+function saveUi(){ writeJson(UIKEY, ui); }
+
+const cacheKey = () => CACHE_PREFIX + (session.user||'').toLowerCase();
+function writeCache(){ writeJson(cacheKey(), {data:db, version:sync.version, dirty:sync.dirty}); }
 function save(){
-  try{ localStorage.setItem(KEY, JSON.stringify(db)); }
-  catch(e){ toast('Could not save in this browser. Export a backup now.'); }
+  sync.dirty = true;
+  writeCache();
   render();
+  clearTimeout(sync.timer);
+  sync.timer = setTimeout(push, 600);
 }
+
+async function api(path, opts){
+  opts = opts || {};
+  const headers = {'X-Team-Passcode': session.passcode || ''};
+  if(opts.body) headers['Content-Type'] = 'application/json';
+  const r = await fetch(SERVER_URL + path, Object.assign({}, opts, {headers}));
+  if(r.status===401 || r.status===429){
+    const e = new Error(r.status===401 ? 'Wrong passcode' : 'Too many wrong passcodes. Try again in an hour.');
+    e.code = r.status; throw e;
+  }
+  return r;
+}
+async function errorText(r){ try{ return (await r.json()).error || ('error '+r.status); }catch(e){ return 'error '+r.status; } }
+
+async function push(){
+  if(sync.inflight || !sync.dirty || !session.user) return;
+  sync.inflight = true; setSync('saving');
+  const sent = JSON.stringify(db);
+  try{
+    const r = await api('/data?user='+encodeURIComponent(session.user),
+      {method:'PUT', body: JSON.stringify({data:db, baseVersion:sync.version})});
+    if(r.status===409){ resolveConflict(await r.json()); }
+    else if(!r.ok){ throw new Error(await errorText(r)); }
+    else{
+      sync.version = (await r.json()).version;
+      if(JSON.stringify(db)===sent) sync.dirty = false;   // else edited mid-save; go again
+      writeCache();
+      setSync('saved');
+    }
+  }catch(e){
+    if(e.code===401){ sync.inflight = false; return forgetPasscode(); }
+    setSync('offline', e.message);
+    clearTimeout(sync.retry); sync.retry = setTimeout(push, 30000);
+  }finally{
+    sync.inflight = false;
+  }
+  setSync(sync.state, sync.error);
+  if(sync.dirty && sync.state!=='offline') push();
+}
+function resolveConflict(server){
+  const useServer = confirm('Your tracker was changed on another device since this page loaded.\n\n'
+    + 'OK: use the latest saved version (the changes made here will be lost).\n'
+    + 'Cancel: keep this version and replace the other device’s changes.');
+  sync.version = server.version;
+  if(useServer){ db = normalize(server.data); sync.dirty = false; writeCache(); render(); toast('Loaded the latest version'); }
+  // else stays dirty and push() saves again on top of the new version
+}
+// "Saved" only when nothing is waiting to reach the server
+function syncLabel(){
+  return sync.state==='offline' ? '<span class="warn">Not saved</span>' : (sync.dirty || sync.inflight) ? 'Saving…' : 'Saved ✓';
+}
+function setSync(state, error){
+  sync.state = state; sync.error = error || '';
+  const el = document.getElementById('syncState');
+  if(el) el.innerHTML = syncLabel();
+  document.getElementById('banner').innerHTML = renderBanner();
+}
+
+// Load the signed-in user's data, preferring unsaved local changes when they're still current.
+async function loadUser(){
+  const cache = readJson(cacheKey());
+  if(cache){ db = normalize(cache.data); sync.version = cache.version; sync.dirty = !!cache.dirty; ready = true; render(); }
+  let r;
+  try{ r = await api('/data?user='+encodeURIComponent(session.user)); }
+  catch(e){
+    if(e.code===401) return forgetPasscode();
+    if(e.code===429) return showSignIn(e.message);
+    if(cache){ setSync('offline', e.message); clearTimeout(sync.retry); sync.retry = setTimeout(push, 30000); return; }
+    return showSignIn('Can’t reach the server ('+e.message+'). Check your connection and try again.');
+  }
+  if(r.status===404){
+    // New user: bring along anything this browser had from before the server existed
+    const legacy = readJson(LEGACY_KEY);
+    const n = legacy ? (legacy.facilities||[]).length + (legacy.visits||[]).length : 0;
+    if(!cache && n && confirm(`This browser has ${(legacy.facilities||[]).length} facilities and ${(legacy.visits||[]).length} visits saved from before. Move them into your tracker?`)){
+      db = normalize(legacy);
+      try{ localStorage.removeItem(LEGACY_KEY); }catch(e){}
+    }else if(!cache){ db = blank(); }
+    sync.version = 0; sync.dirty = true; ready = true;
+    save();
+    return;
+  }
+  if(!r.ok) return showSignIn('Server problem: '+await errorText(r));
+  const server = await r.json();
+  session.user = server.name; writeJson(SESSION_KEY, session);   // use the stored spelling
+  // sync.dirty (not cache.dirty): the cached copy is on screen while this loads and may have been edited meanwhile
+  if(server.version < sync.version){ /* a save already went through while this was loading */ }
+  else if(sync.dirty && sync.version===server.version){ push(); }                // finish saving what was left
+  else if(sync.dirty){ resolveConflict(server); push(); }
+  else{ db = normalize(server.data); sync.version = server.version; writeCache(); }
+  ready = true; render(); setSync(sync.dirty ? 'saving' : 'saved');
+}
+// Pick up changes made on another device when this tab comes back into view
+async function refreshFromServer(){
+  if(!ready || sync.dirty || sync.inflight || document.querySelector('dialog[open]')) return;
+  try{
+    const r = await api('/data?user='+encodeURIComponent(session.user));
+    if(!r.ok) return;
+    const server = await r.json();
+    // Re-check: an edit or save may have started while this request was out
+    if(server.version > sync.version && !sync.dirty && !sync.inflight && !document.querySelector('dialog[open]')){
+      db = normalize(server.data); sync.version = server.version; writeCache(); render(); toast('Updated with changes from another device');
+    }
+  }catch(e){ if(e.code===401) forgetPasscode(); }
+}
+
+// ---------- sign-in ----------
+function forgetPasscode(){ session = {user: session.user}; writeJson(SESSION_KEY, session); showSignIn('The team passcode has changed. Enter the new one.'); }
+function signOut(){
+  if(sync.dirty && !confirm('Some changes haven’t reached the server yet and will be lost. Switch anyway?')) return;
+  session = {passcode: session.passcode}; writeJson(SESSION_KEY, session);
+  db = blank(); ready = false; sync.version = 0; sync.dirty = false;
+  showSignIn();
+}
+async function showSignIn(msg){
+  ready = false;
+  document.body.classList.add('signed-out');
+  document.getElementById('banner').innerHTML = '';
+  const view = document.getElementById('view');
+  if(!session.passcode){
+    view.innerHTML = `<form class="panel signin" id="pcForm">
+      <h2 style="margin-top:0">Welcome</h2>
+      <label>Team passcode<input name="pc" inputmode="numeric" autocomplete="off" required autofocus></label>
+      <button class="primary" type="submit">Continue</button>
+      <p class="small warn">${esc(msg||'')}</p></form>`;
+    return;
+  }
+  view.innerHTML = `<div class="panel signin"><p class="muted">Loading names…</p></div>`;
+  let users = [];
+  try{
+    const r = await api('/users');
+    if(!r.ok) throw new Error(await errorText(r));
+    users = (await r.json()).users;
+  }catch(e){
+    if(e.code===401){ session = {}; writeJson(SESSION_KEY, session); return showSignIn('That passcode isn’t right.'); }
+    view.innerHTML = `<div class="panel signin"><p class="warn">${esc(e.message)}</p><button data-act="retry-signin">Try again</button></div>`;
+    return;
+  }
+  view.innerHTML = `<form class="panel signin" id="nameForm">
+    <h2 style="margin-top:0">Who are you?</h2>
+    <label>Your name<select name="pick">
+      <option value="">Choose your name…</option>
+      ${users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}
+      <option value="__new">I’m new: enter my name</option>
+    </select></label>
+    <label id="newNameWrap" hidden>Enter your name<input name="newName" maxlength="60" placeholder="First and last name"></label>
+    <button class="primary" type="submit">Open my tracker</button>
+    <p class="small warn">${esc(msg||'')}</p></form>`;
+  const f = document.getElementById('nameForm');
+  if(!users.length){ f.pick.value = '__new'; document.getElementById('newNameWrap').hidden = false; }
+  f.pick.addEventListener('change', () => {
+    const isNew = f.pick.value==='__new';
+    document.getElementById('newNameWrap').hidden = !isNew;
+    if(isNew) f.newName.focus();
+  });
+  showSignIn.users = users;
+}
+document.addEventListener('submit', async e => {
+  if(e.target.id==='pcForm'){
+    e.preventDefault();
+    session.passcode = e.target.pc.value.trim();
+    writeJson(SESSION_KEY, session);
+    if(session.user){ document.body.classList.remove('signed-out'); loadUser(); } else showSignIn();
+  }
+  if(e.target.id==='nameForm'){
+    e.preventDefault();
+    const f = e.target, users = showSignIn.users || [];
+    let name = f.pick.value;
+    if(name==='__new'){
+      name = f.newName.value.trim().replace(/\s+/g,' ');
+      if(!name){ f.newName.focus(); return; }
+      const match = users.find(u => u.name.toLowerCase()===name.toLowerCase());
+      if(match) name = match.name;
+      else if(!confirm(`Start a new tracker for “${name}”?`)) return;
+    }
+    if(!name) return;
+    session.user = name; writeJson(SESSION_KEY, session);
+    document.body.classList.remove('signed-out');
+    document.getElementById('view').innerHTML = '<div class="panel">Loading…</div>';
+    loadUser();
+  }
+});
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 const S = () => db.settings;
 
@@ -411,24 +609,25 @@ function renderSettings(){
     </div>
     <div class="panel">
       <h2 style="margin-top:0">Your data</h2>
-      <p class="small">Everything is saved <b>only in this browser on this computer</b>. Nothing is sent anywhere. Export a backup regularly, and use the backup to move to another computer or browser.</p>
-      <p class="small muted">Last backup: ${s.lastBackup ? fmt(s.lastBackup,{month:'short',day:'numeric',year:'numeric'}) : 'never'}</p>
+      <p class="small">Your tracker is saved automatically to the team server under <b>${esc(session.user)}</b>. Open this page on any device and pick your name to see it. You can also export a copy as a file at any time.</p>
       <div class="row">
         <button class="primary" data-act="export">Export backup</button>
         <button data-act="import">Import backup…</button>
         <span class="grow"></span>
-        <button class="danger" data-act="wipe">Erase all data</button>
+        <button class="danger" data-act="wipe">Erase my tracker</button>
       </div>
     </div>`;
 }
 
 function renderBanner(){
-  const s = S();
-  const stale = db.visits.length && (!s.lastBackup || daysBetween(s.lastBackup, today()) > 14);
-  return stale ? `<div class="banner">Your data is only stored in this browser. Last backup: ${s.lastBackup?fmt(s.lastBackup):'never'}.<button class="small" data-act="export">Export backup</button></div>` : '';
+  if(!ready || sync.state!=='offline') return '';
+  return `<div class="banner">Changes aren’t saved to the server yet (${esc(sync.error)}). They’re kept in this browser and will save when the connection is back.<button class="small" data-act="retry-push">Retry now</button></div>`;
 }
 
 function render(){
+  if(!ready) return;
+  document.body.classList.remove('signed-out');
+  document.getElementById('who').innerHTML = `${esc(session.user)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="switch-user">Switch user</button>`;
   const tab = ui.tab || (db.facilities.length ? 'status' : 'facilities');
   document.querySelectorAll('#tabs button').forEach(b => {
     b.classList.toggle('on', b.dataset.tab===tab);
@@ -550,7 +749,7 @@ function openFac(f){
   facDlg.showModal();
 }
 
-// Address lookup: Google via your Worker when GOOGLE_LOOKUP_URL is set, else OpenStreetMap (free, no key).
+// Address lookup: Google via the team server, else OpenStreetMap (free, no key).
 // Button-triggered only, per Nominatim's usage policy.
 let lookupResults = [], lookupBusy = false;
 function osmAddress(a){
@@ -561,7 +760,7 @@ function osmAddress(a){
   return [street, city, [st, a.postcode].filter(Boolean).join(' ')].filter(Boolean).join(', ');
 }
 async function searchGoogle(q){
-  const r = await fetch(GOOGLE_LOOKUP_URL + '?q=' + encodeURIComponent(q));
+  const r = await api('/lookup?q=' + encodeURIComponent(q));
   if(!r.ok) throw new Error('error '+r.status);
   return ((await r.json()).results || []).map(x => ({addr: x.address, name: x.name, street: /^\d/.test(x.address)}));
 }
@@ -582,7 +781,7 @@ async function lookupAddress(){
   let source = '', googleErr = '';
   try{
     lookupResults = [];
-    if(GOOGLE_LOOKUP_URL){
+    if(SERVER_URL){
       msg.textContent = 'Searching Google…';
       try{ lookupResults = await searchGoogle(q); source = 'Google'; }
       catch(e){ googleErr = e.message; }
@@ -670,12 +869,13 @@ document.addEventListener('click', e => {
     case 'ics': download('visit-schedule.ics', icsFile(), 'text/calendar'); break;
     case 'csv': { const r = logRange(); download(`visits_${r.from}_to_${r.to}.csv`, csvFile(), 'text/csv'); break; }
     case 'export':
-      db.settings.lastBackup = today();
-      download(`facility-visits-backup-${today()}.json`, JSON.stringify(db, null, 2), 'application/json');
-      save(); break;
+      download(`facility-visits-${today()}.json`, JSON.stringify(db, null, 2), 'application/json'); break;
+    case 'retry-push': clearTimeout(sync.retry); push(); break;
+    case 'retry-signin': showSignIn(); break;
+    case 'switch-user': signOut(); break;
     case 'import': document.getElementById('importFile').click(); break;
     case 'wipe':
-      if(confirm('Erase all facilities and visits from this browser? Export a backup first if you might need them.')){ db = blank(); save(); }
+      if(confirm('Erase all your facilities and visits from the server? Export a copy first if you might need them.')){ db = blank(); save(); }
       break;
   }
 });
@@ -702,13 +902,17 @@ document.getElementById('importFile').addEventListener('change', e => {
   file.text().then(txt => {
     const d = JSON.parse(txt);
     if(!Array.isArray(d.facilities) || !Array.isArray(d.visits)) throw new Error('bad');
-    if(!confirm(`Replace the data in this browser with ${d.facilities.length} facilities and ${d.visits.length} visits from this backup?`)) return;
-    db = {facilities:d.facilities, visits:d.visits, settings:Object.assign(blank().settings, d.settings||{})};
-    save(); toast('Backup imported');
+    if(!confirm(`Replace your tracker with ${d.facilities.length} facilities and ${d.visits.length} visits from this backup?`)) return;
+    db = normalize(d);
+    save(); toast('Imported');
   }).catch(() => alert('That file isn’t a Facility Visit Tracker backup.'));
 });
 
-render();
+window.addEventListener('online', () => { if(sync.dirty) push(); });
+document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshFromServer(); });
+window.addEventListener('beforeunload', e => { if(sync.dirty){ e.preventDefault(); e.returnValue = ''; } });
+
+if(session.passcode && session.user) loadUser(); else showSignIn();
 </script>
 </body>
 </html>
