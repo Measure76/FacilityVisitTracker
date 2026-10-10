@@ -3,7 +3,7 @@
 A single-page app for planning and logging facility visits.
 
 - **Status** – every facility, sorted by how soon it is due. Drive facilities are due every 6 weeks and fly facilities every 8 weeks (both adjustable). Overdue, due soon, and "due but not scheduled in time" are flagged.
-- **Schedule** – plan visits and multi-day team meetings/projects. Each week shows how many visit days are left after the office day (Monday by default) and team events. One click copies a schedule for email or downloads a calendar (.ics) file for managers and facilities.
+- **Schedule** – a calendar (narrow weekends, office days and team holidays marked). Drag a facility or a team meeting/project onto a day to book it, or tap it and then tap a day on a phone; drag anything on the calendar to move it. Each week shows how many visit days are left. One click copies the schedule for email or downloads a calendar (.ics) file.
 - **Visit log** – completed visits by date range with addresses, an "entered in Concur" checkbox, and CSV export for expense reconciliation.
 
 ## Address lookup

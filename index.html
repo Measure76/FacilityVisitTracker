@@ -82,6 +82,35 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 dialog h2{margin-top:0}
 .dlg-actions{display:flex;gap:8px;margin-top:6px}
 textarea.out{width:100%;height:300px;font:13px/1.4 ui-monospace,Consolas,monospace}
+.palette{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 6px}
+.pchip{font:inherit;font-size:13px;border:1px solid var(--border);border-left:4px solid var(--green);border-radius:6px;padding:4px 8px;background:var(--panel);color:var(--text);cursor:grab;user-select:none;-webkit-user-select:none}
+.pchip.overdue,.pchip.never{border-left-color:var(--red)} .pchip.soon{border-left-color:var(--amber)}
+.pchip .sub{color:var(--muted);font-size:11px;margin-left:4px}
+.pchip.booked{opacity:.45}
+.pchip.team{border-left-color:var(--blue);background:var(--blue-bg)}
+.pchip.armed{outline:2px solid var(--accent);outline-offset:1px}
+.palette-hint{font-size:12px;color:var(--muted);margin:0 0 12px}
+.calwrap{overflow-x:auto;margin-bottom:16px}
+.cal{display:grid;grid-template-columns:repeat(5,minmax(0,1fr)) minmax(0,.45fr) minmax(0,.45fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:600px}
+.cal .dow{background:var(--gray-bg);font-size:12px;color:var(--muted);padding:4px;text-align:center}
+.cal .wk{grid-column:1/-1;background:var(--bg);font-size:12px;color:var(--muted);padding:6px 6px 3px}
+.day{background:var(--panel);min-height:78px;padding:4px;min-width:0;font-size:12px}
+.day.weekend,.day.office{background:var(--gray-bg)}
+.day.holiday{background:var(--amber-bg)}
+.day.over{outline:2px dashed var(--accent);outline-offset:-3px}
+body.placing .day{cursor:copy}
+.dnum{font-weight:600}
+.day.past .dnum{color:var(--muted);font-weight:normal}
+.day.today .dnum{background:var(--accent);color:var(--accent-text);border-radius:9px;padding:0 6px}
+.dtag{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.day.holiday .dtag{color:var(--amber);font-weight:600}
+.ev{display:block;width:100%;margin-top:3px;padding:2px 5px;border:none;border-left:3px solid var(--accent);border-radius:4px;background:var(--blue-bg);color:var(--text);font:inherit;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.ev.done{border-left-color:var(--green);background:var(--green-bg);color:var(--green)}
+.ev.unconfirmed{border-left-color:var(--amber);background:var(--amber-bg);color:var(--amber)}
+.ev.team{border-left:none;background:var(--accent);color:var(--accent-text);border-radius:0;margin-left:-4px;margin-right:-4px;width:calc(100% + 8px);padding-left:9px}
+.ev.team.first{border-radius:4px 0 0 4px;margin-left:0;width:calc(100% + 4px);padding-left:5px}
+.ev.team.last{border-radius:0 4px 4px 0;margin-right:0;width:calc(100% + 4px)}
+.ev.team.first.last{border-radius:4px;width:100%}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 @media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
@@ -410,12 +439,39 @@ function whenText(v){
   const e = endOf(v);
   return e===v.date ? fmtDay(v.date) : fmt(v.date,{weekday:'short',month:'short',day:'numeric'})+' – '+fmtDay(e);
 }
-// Weekdays minus the office day and days taken by team meetings/projects
+// Team holidays, using the federal "observed" rule: a Saturday holiday is taken the
+// Friday before, a Sunday holiday the Monday after.
+const holidayCache = {};
+function holidaysFor(y){
+  if(holidayCache[y]) return holidayCache[y];
+  const nth = (m, wd, n) => { const d = new Date(y, m, 1); d.setDate(1 + (wd - d.getDay() + 7) % 7 + (n-1)*7); return d; };
+  const last = (m, wd) => { const d = new Date(y, m+1, 0); d.setDate(d.getDate() - (d.getDay() - wd + 7) % 7); return d; };
+  const observed = (m, day) => { const d = new Date(y, m, day); if(d.getDay()===6) d.setDate(day-1); else if(d.getDay()===0) d.setDate(day+1); return d; };
+  const thanks = nth(10, 4, 4), after = new Date(y, 10, thanks.getDate()+1);
+  const list = [[observed(0,1),'New Year’s Day'], [last(4,1),'Memorial Day'], [observed(6,4),'Independence Day'],
+    [nth(8,1,1),'Labor Day'], [thanks,'Thanksgiving'], [after,'Day after Thanksgiving'], [observed(11,25),'Christmas']];
+  const map = {};
+  list.forEach(([d, name]) => { map[iso(d)] = name; });
+  return holidayCache[y] = map;
+}
+// Next year's New Year's Day can be observed on Dec 31, so check both years
+const holidayOn = d => { const y = +d.slice(0,4); return holidaysFor(y)[d] || holidaysFor(y+1)[d] || ''; };
+const isWeekend = d => { const wd = parse(d).getDay(); return wd===0 || wd===6; };
+// Why a facility visit on this day would be unusual, or '' if it's a normal visit day
+function dayProblem(d){
+  const h = holidayOn(d);
+  if(h) return 'is '+h;
+  if(isWeekend(d)) return 'is a weekend';
+  if(isOffice(d)) return 'is an office day';
+  const b = blockOn(d);
+  return b ? 'is during '+visitLabel(b) : '';
+}
+// Weekdays minus the office day, holidays and days taken by team meetings/projects
 function weekCapacity(ws){
   let avail = 0; const used = new Set();
   for(let i=0;i<7;i++){
     const d = addDays(ws,i), wd = parse(d).getDay();
-    if(wd===0 || wd===6 || isOffice(d) || blockOn(d)) continue;
+    if(wd===0 || wd===6 || isOffice(d) || holidayOn(d) || blockOn(d)) continue;
     avail++;
     if(db.visits.some(v => v.facilityId && v.date===d)) used.add(d);
   }
@@ -527,10 +583,11 @@ function rangeVisits(r){
 function renderSchedule(){
   const r = schedRange();
   let h = `<div class="toolbar">
+    <button data-act="sched-move" data-n="-1" title="Earlier week">◀</button>
+    <button data-act="sched-today">This week</button>
+    <button data-act="sched-move" data-n="1" title="Later week">▶</button>
     <label>Starting week of<input type="date" id="schedStart" value="${r.start}"></label>
     <label>Show<select id="schedWeeks">${[1,2,3,4,5,6,8,10,12].map(n=>`<option value="${n}" ${n===r.weeks?'selected':''}>${n} week${n>1?'s':''}</option>`).join('')}</select></label>
-    <button class="primary" data-act="new-visit" data-status="planned">+ Plan a visit</button>
-    <button data-act="new-visit" data-status="planned" data-other="1">+ Team meeting / project</button>
     <span class="grow"></span>
     <button data-act="email-text">Copy for email</button>
     <button data-act="ics">Download calendar (.ics)</button>
@@ -541,24 +598,115 @@ function renderSchedule(){
     h += `<h2>Did these happen?</h2><div class="list">${pend.map(v=>visitRow(v,{confirm:true})).join('')}</div>`;
   }
 
-  // facilities that come due in this window but have no visit in time
-  const gaps = allStatus().filter(s => (s.due==null || s.due<r.end) && s.needsPlan);
-  if(gaps.length){
-    h += `<div class="hint"><b>Coming due by ${fmt(addDays(r.end,-1))} with no visit scheduled in time:</b>
-      <div class="row">${gaps.map(s=>`<button class="small" data-act="new-visit" data-fid="${s.f.id}" data-status="planned" title="${esc(statusText(s))}">+ ${esc(s.f.name)} <span class="badge ${s.level}">${s.due?'due '+fmt(s.due):'never visited'}</span></button>`).join('')}</div></div>`;
-  }
+  // Palette: every facility, most urgent first; dimmed once a visit is booked in time
+  const chips = allStatus().map(st => {
+    const booked = st.next && !st.planLate;
+    const sub = st.level==='never' ? 'never visited' : st.daysLeft<0 ? (-st.daysLeft)+'d overdue' : 'due '+fmt(st.due);
+    const armed = placing && placing.kind==='fac' && placing.fid===st.f.id;
+    return `<button class="pchip ${st.level}${booked?' booked':''}${armed?' armed':''}" draggable="true" data-drag="fac" data-fid="${st.f.id}" data-act="arm"
+      title="${esc(statusText(st))}${st.next?' · next planned '+fmt(st.next):''}">${esc(st.f.name)}${st.f.type==='remote'?' ✈':''}<span class="sub">${sub}</span></button>`;
+  }).join('');
+  const teamArmed = placing && placing.kind==='team';
+  h += `<div class="palette">${chips}
+    <button class="pchip team${teamArmed?' armed':''}" draggable="true" data-drag="team" data-act="arm">+ Team meeting / project</button></div>
+    <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
+      : 'Drag a facility onto a day to book it, or tap it and then tap a day. Click anything on the calendar to edit it.'}</p>`;
 
-  const vs = rangeVisits(r).filter(v => !(v.facilityId && v.status==='planned' && v.date<today()));
+  // Calendar
+  const vs = rangeVisits(r);
+  const t = today();
+  h += '<div class="calwrap"><div class="cal">' + ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<div class="dow">${d}</div>`).join('');
   for(let w=0; w<r.weeks; w++){
-    const ws = addDays(r.start, w*7), we = addDays(ws, 7);
-    const items = vs.filter(v => overlaps(v, ws, we));
+    const ws = addDays(r.start, w*7);
     const cap = weekCapacity(ws);
-    const capTxt = cap.avail===0 ? 'no visit days available'
-      : cap.used+' of '+cap.avail+' visit day'+(cap.avail===1?'':'s')+' used';
-    h += `<h3>Week of ${fmt(ws)} <span class="cap">· ${capTxt}</span></h3><div class="list">${items.length ? items.map(v=>visitRow(v)).join('') : '<div class="empty">Nothing scheduled</div>'}</div>`;
+    h += `<div class="wk">Week of ${fmt(ws)} · ${cap.avail===0 ? 'no visit days available' : cap.used+' of '+cap.avail+' visit day'+(cap.avail===1?'':'s')+' used'}</div>`;
+    for(let i=0; i<7; i++){
+      const d = addDays(ws, i), wd = parse(d).getDay();
+      const hol = holidayOn(d), weekend = wd===0 || wd===6, office = !hol && !weekend && isOffice(d);
+      const cls = ['day', weekend?'weekend':'', office?'office':'', hol?'holiday':'', d<t?'past':'', d===t?'today':''].filter(Boolean).join(' ');
+      const num = (i===0 && w===0) || d.endsWith('-01') ? fmt(d) : String(parse(d).getDate());
+      const tag = hol || (office ? 'Office day' : '');
+      const events = vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
+        const first = v.date===d, lastDay = endOf(v)===d, label = first || i===0 ? esc(visitLabel(v)) : '&nbsp;';
+        return `<button class="ev team${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
+      }).join('');
+      const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
+        const f = fac(v.facilityId), done = v.status==='completed', unconf = !done && d<t;
+        return `<button class="ev${done?' done':''}${unconf?' unconfirmed':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
+          title="${esc(visitLabel(v))}${done?' · completed':unconf?' · did this happen?':' · planned'}">${done?'✓ ':unconf?'? ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
+      }).join('');
+      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${events}${visits}</div>`;
+    }
   }
-  return h;
+  return h + '</div></div>';
 }
+
+// ---------- drag & drop / tap-to-place ----------
+let placing = null;   // {kind:'fac', fid} | {kind:'team'} while waiting for a day tap
+function dropOn(date, item){
+  if(item.kind==='team'){
+    openVisit(null, {facilityId:'', date, endDate:date, status:'planned'});
+    return;
+  }
+  if(item.kind==='visit'){
+    const v = db.visits.find(x => x.id===item.id);
+    if(!v || v.date===date) return;
+    if(v.facilityId){
+      const why = dayProblem(date);
+      if(why && !confirm(fmtDay(date)+' '+why+'. Move the visit there anyway?')) return;
+      if(v.status==='completed' && date>today()) v.status = 'planned';
+      v.date = date;
+    }else{
+      const len = daysBetween(v.date, endOf(v));
+      v.date = date;
+      if(v.endDate) v.endDate = addDays(date, len);
+    }
+    save(); toast('Moved to '+fmtDay(date));
+    return;
+  }
+  const f = fac(item.fid);
+  if(!f) return;
+  if(db.visits.some(v => v.facilityId===f.id && v.date===date)){ toast(f.name+' is already on '+fmtDay(date)); return; }
+  const why = dayProblem(date);
+  if(why && !confirm(fmtDay(date)+' '+why+'. Book '+f.name+' anyway?')) return;
+  const past = date < today();
+  if(past && !confirm(fmtDay(date)+' is in the past. Log it as a completed visit to '+f.name+'?')) return;
+  db.visits.push({id:uid(), facilityId:f.id, date, status: past?'completed':'planned', notes:'', label:'', endDate:'', concur:false});
+  save(); toast((past?'Logged ':'Booked ')+f.name+' on '+fmtDay(date));
+}
+function setPlacing(p){
+  placing = p;
+  document.body.classList.toggle('placing', !!p);
+  render();
+}
+document.addEventListener('dragstart', e => {
+  const el = e.target.closest && e.target.closest('[data-drag]');
+  if(!el) return;
+  const item = el.dataset.drag==='fac' ? {kind:'fac', fid:el.dataset.fid} : el.dataset.drag==='team' ? {kind:'team'} : {kind:'visit', id:el.dataset.id};
+  e.dataTransfer.setData('text/plain', JSON.stringify(item));
+  e.dataTransfer.effectAllowed = item.kind==='visit' ? 'move' : 'copy';
+});
+document.addEventListener('dragover', e => {
+  const day = e.target.closest && e.target.closest('.day[data-date]');
+  if(!day) return;
+  e.preventDefault();
+  document.querySelectorAll('.day.over').forEach(x => { if(x!==day) x.classList.remove('over'); });
+  day.classList.add('over');
+});
+document.addEventListener('dragleave', e => {
+  const day = e.target.closest && e.target.closest('.day.over');
+  if(day && !day.contains(e.relatedTarget)) day.classList.remove('over');
+});
+document.addEventListener('drop', e => {
+  const day = e.target.closest && e.target.closest('.day[data-date]');
+  document.querySelectorAll('.day.over').forEach(x => x.classList.remove('over'));
+  if(!day) return;
+  e.preventDefault();
+  let item; try{ item = JSON.parse(e.dataTransfer.getData('text/plain')); }catch(x){ return; }
+  if(placing) setPlacing(null);
+  dropOn(day.dataset.date, item);
+});
+document.addEventListener('keydown', e => { if(e.key==='Escape' && placing) setPlacing(null); });
 
 function logRange(){
   const t = parse(today());
@@ -654,9 +802,11 @@ function emailText(){
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7), we = addDays(ws,7);
     lines.push('', 'Week of '+fmt(ws));
-    const items = vs.filter(v => overlaps(v, ws, we));
-    if(!items.length) lines.push('  No visits scheduled');
-    items.forEach(v => lines.push('  '+whenText(v)+' – '+visitLabel(v)));
+    const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+whenText(v)+' – '+visitLabel(v)]);
+    for(let i=0; i<5; i++){ const d = addDays(ws, i), hol = holidayOn(d); if(hol) rows.push([d, '  '+fmtDay(d)+' – '+hol+' (holiday)']); }
+    rows.sort((a,b) => a[0].localeCompare(b[0]));
+    if(!rows.length) lines.push('  No visits scheduled');
+    rows.forEach(x => lines.push(x[1]));
   }
   return lines.join('\n');
 }
@@ -727,8 +877,7 @@ visitForm.addEventListener('submit', e => {
   const isFac = !!f.facilityId.value;
   if(!isFac && f.endDate.value && f.endDate.value<f.date.value){ alert('The last day can’t be before the first day.'); return; }
   if(isFac){
-    const block = blockOn(f.date.value);
-    const why = isOffice(f.date.value) ? 'is an office day' : block ? 'is during '+visitLabel(block) : '';
+    const why = dayProblem(f.date.value);
     if(why && !confirm(fmtDay(f.date.value)+' '+why+'. Schedule the visit anyway?')) return;
   }
   const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
@@ -829,6 +978,11 @@ async function copy(text){
 
 // ---------- events ----------
 document.addEventListener('click', e => {
+  // Tap-to-place: after tapping a palette button, the next tap on a day places it
+  if(placing){
+    const day = e.target.closest('.day[data-date]');
+    if(day){ const p = placing; setPlacing(null); dropOn(day.dataset.date, p); return; }
+  }
   const b = e.target.closest('[data-act],[data-tab]');
   if(!b) return;
   if(b.dataset.tab && !b.dataset.act){ ui.tab = b.dataset.tab; saveUi(); render(); return; }
@@ -838,6 +992,14 @@ document.addEventListener('click', e => {
     case 'close': b.closest('dialog').close(); break;
     case 'new-visit': openVisit(null, {facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
+    case 'arm': {
+      const p = b.dataset.drag==='team' ? {kind:'team'} : {kind:'fac', fid:b.dataset.fid};
+      const same = placing && placing.kind===p.kind && placing.fid===p.fid;
+      setPlacing(same ? null : p);
+      break;
+    }
+    case 'sched-move': ui.schedStart = addDays(schedRange().start, 7*(+b.dataset.n)); saveUi(); render(); break;
+    case 'sched-today': ui.schedStart = mondayOf(today()); saveUi(); render(); break;
     case 'delete-visit':
       if(editingVisit && confirm('Delete this entry?')){ db.visits = db.visits.filter(x => x!==editingVisit); visitDlg.close(); save(); }
       break;
