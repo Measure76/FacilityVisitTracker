@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Facility Visit Tracker</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#ffffff; --text:#1c2230; --muted:#5e6777; --border:#d8dce3;
+  --accent:#2457c5; --accent-text:#ffffff;
+  --red:#b42318; --red-bg:#fdeceb; --amber:#8a5a00; --amber-bg:#fff4d8;
+  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#13161b; --panel:#1c2027; --text:#e6e9ee; --muted:#9aa3b2; --border:#323843;
+    --accent:#6f9cff; --accent-text:#0b1020;
+    --red:#ff8f85; --red-bg:#3b1f1d; --amber:#f2c065; --amber-bg:#3a3018;
+    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:16px}
+header h1{font-size:20px;margin:0 0 12px}
+nav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:16px}
+nav button{background:none;border:none;border-bottom:3px solid transparent;padding:8px 12px;color:var(--muted);font:inherit;cursor:pointer}
+nav button.on{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+nav .count{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--red);color:var(--panel);font-size:12px;text-align:center}
+button,.btn{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+button.danger{color:var(--red)}
+button.small{padding:3px 9px;font-size:13px}
+input,select,textarea{font:inherit;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);max-width:100%}
+label{display:block;margin-bottom:10px;font-size:13px;color:var(--muted)}
+label input:not([type=checkbox]),label select,label textarea{display:block;width:100%;margin-top:3px;font-size:15px}
+label.check{display:flex;gap:8px;align-items:center;color:var(--text);font-size:15px}
+.muted{color:var(--muted)} .small{font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.toolbar label{margin:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{padding:8px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--border);min-width:120px}
+.chip b{display:block;font-size:22px;line-height:1.1}
+.chip.red b{color:var(--red)} .chip.amber b{color:var(--amber)} .chip.blue b{color:var(--blue)}
+.card{background:var(--panel);border:1px solid var(--border);border-left:5px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.card.overdue,.card.never{border-left-color:var(--red)} .card.soon{border-left-color:var(--amber)} .card.ok{border-left-color:var(--green)}
+.card-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.fname{font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:4px 18px;margin:6px 0;font-size:14px}
+.badge{display:inline-block;white-space:nowrap;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600}
+.badge.overdue,.badge.never{background:var(--red-bg);color:var(--red)}
+.badge.soon{background:var(--amber-bg);color:var(--amber)}
+.badge.ok{background:var(--green-bg);color:var(--green)}
+.badge.fly{background:var(--blue-bg);color:var(--blue)}
+.badge.gray{background:var(--gray-bg);color:var(--muted)}
+.warn{color:var(--red);font-weight:600}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+h2{font-size:17px;margin:18px 0 8px}
+.cap{text-transform:none;letter-spacing:0;font-weight:normal}
+h3{font-size:14px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.list{background:var(--panel);border:1px solid var(--border);border-radius:8px}
+.item{display:flex;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid var(--border);flex-wrap:wrap}
+.item:first-child{border-top:none}
+.item .date{min-width:92px;flex-shrink:0;font-variant-numeric:tabular-nums}
+.item .what{flex:1;min-width:150px}
+.item.done .what{color:var(--muted)}
+.empty{padding:12px;color:var(--muted)}
+.banner{background:var(--amber-bg);color:var(--amber);border-radius:8px;padding:8px 12px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px}
+.hint{background:var(--panel);border:1px dashed var(--border);border-radius:8px;padding:10px 12px;margin-bottom:14px}
+.hint .row{margin-top:6px}
+dialog{border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text);padding:16px;width:min(480px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h2{margin-top:0}
+.dlg-actions{display:flex;gap:8px;margin-top:6px}
+textarea.out{width:100%;height:300px;font:13px/1.4 ui-monospace,Consolas,monospace}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+@media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Facility Visit Tracker</h1></header>
+  <nav id="tabs">
+    <button data-tab="status">Status</button>
+    <button data-tab="schedule">Schedule</button>
+    <button data-tab="log">Visit log</button>
+    <button data-tab="facilities">Facilities</button>
+    <button data-tab="settings">Data &amp; settings</button>
+  </nav>
+  <div id="banner"></div>
+  <main id="view"></main>
+</div>
+
+<dialog id="visitDlg">
+  <form id="visitForm">
+    <h2 id="visitTitle">Visit</h2>
+    <label>Date<input type="date" name="date" required></label>
+    <label>Where<select name="facilityId"></select></label>
+    <label id="otherWrap">What is it?<input name="label" placeholder="Team meeting, team project, PTO…"></label>
+    <label id="endWrap">Last day (for multi-day meetings and projects)<input type="date" name="endDate"></label>
+    <label id="statusWrap">Status
+      <select name="status"><option value="planned">Planned</option><option value="completed">Completed</option></select>
+    </label>
+    <label>Notes<textarea name="notes" rows="2"></textarea></label>
+    <label class="check" id="concurWrap"><input type="checkbox" name="concur"> Entered in Concur</label>
+    <div class="dlg-actions">
+      <button type="button" class="danger" data-act="delete-visit" id="visitDel">Delete</button>
+      <span class="grow"></span>
+      <button type="button" data-act="close">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="facDlg">
+  <form id="facForm">
+    <h2 id="facTitle">Facility</h2>
+    <label>Name
+      <span class="row" style="flex-wrap:nowrap;margin-top:3px">
+        <input name="name" required style="margin-top:0;flex:1;min-width:0">
+        <button type="button" data-act="lookup" title="Look up this name and fill in the first address found" style="white-space:nowrap">Fill address ↓</button>
+      </span>
+    </label>
+    <label style="margin-bottom:4px">Address (used for the Concur mileage lookup)
+      <span class="row" style="flex-wrap:nowrap;margin-top:3px">
+        <input name="address" placeholder="Optional: city, to narrow the fill" style="margin-top:0;flex:1;min-width:0">
+        <button type="button" data-act="maps" title="Search Google Maps for the facility name in a new tab, then copy the address back" style="white-space:nowrap"><span class="wide-only">Find on </span>Google Maps ↗</button>
+      </span>
+    </label>
+    <div id="lookupMsg" class="small muted" style="margin-bottom:10px"></div>
+    <label>Type<select name="type"></select></label>
+    <label>Notes<textarea name="notes" rows="2"></textarea></label>
+    <div class="dlg-actions">
+      <button type="button" class="danger" data-act="delete-fac" id="facDel">Delete</button>
+      <span class="grow"></span>
+      <button type="button" data-act="close">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="textDlg">
+  <h2 id="textTitle">Copy</h2>
+  <p class="muted small">You can edit this before copying.</p>
+  <textarea class="out" id="textOut"></textarea>
+  <div class="dlg-actions"><span class="grow"></span>
+    <button type="button" data-act="close">Close</button>
+    <button type="button" class="primary" data-act="copy-text">Copy</button>
+  </div>
+</dialog>
+
+<input type="file" id="importFile" accept=".json,application/json" hidden>
+<div id="toast"></div>
+
+<script>
+'use strict';
+// Address of your Cloudflare Worker (see worker/SETUP.md), e.g. 'https://facility-lookup.yourname.workers.dev'.
+// Leave empty to use OpenStreetMap only.
+const GOOGLE_LOOKUP_URL = 'https://facility-lookup.measure-717.workers.dev';
+
+// ---------- storage ----------
+const KEY = 'facilityVisitTracker.v1';
+const UIKEY = 'facilityVisitTracker.ui';
+function blank(){ return {facilities:[], visits:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:'', lastBackup:null}}; }
+function load(){
+  try{
+    const s = localStorage.getItem(KEY);
+    if(s){ const d = JSON.parse(s); const b = blank();
+      return {facilities:d.facilities||[], visits:d.visits||[], settings:Object.assign(b.settings, d.settings||{})}; }
+  }catch(e){}
+  return blank();
+}
+let db = load();
+let ui = (()=>{ try{ return JSON.parse(localStorage.getItem(UIKEY))||{}; }catch(e){ return {}; } })();
+function saveUi(){ try{ localStorage.setItem(UIKEY, JSON.stringify(ui)); }catch(e){} }
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(db)); }
+  catch(e){ toast('Could not save in this browser. Export a backup now.'); }
+  render();
+}
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const S = () => db.settings;
+
+// ---------- dates (all as local YYYY-MM-DD strings) ----------
+const pad = n => String(n).padStart(2,'0');
+const iso = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const parse = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
+const today = () => iso(new Date());
+const addDays = (s,n) => { const d = parse(s); d.setDate(d.getDate()+n); return iso(d); };
+const daysBetween = (a,b) => Math.round((parse(b)-parse(a))/864e5);
+const fmt = (s,o) => parse(s).toLocaleDateString(undefined, o||{month:'short',day:'numeric'});
+const fmtDay = s => fmt(s,{weekday:'short',month:'short',day:'numeric'});
+const mondayOf = s => { const d = parse(s); d.setDate(d.getDate()-((d.getDay()+6)%7)); return iso(d); };
+function ago(n){ if(n===0) return 'today'; if(n<14) return n+' day'+(n===1?'':'s')+' ago'; return Math.round(n/7)+' wks ago'; }
+
+// ---------- helpers ----------
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fac = id => db.facilities.find(f => f.id===id);
+const endOf = v => (!v.facilityId && v.endDate && v.endDate>v.date) ? v.endDate : v.date;
+const overlaps = (v, a, b) => v.date<b && endOf(v)>=a;   // b exclusive
+const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const isOffice = d => S().officeDay>=0 && parse(d).getDay()===S().officeDay;
+const blockOn = d => db.visits.find(v => !v.facilityId && v.date<=d && endOf(v)>=d);
+function whenText(v){
+  const e = endOf(v);
+  return e===v.date ? fmtDay(v.date) : fmt(v.date,{weekday:'short',month:'short',day:'numeric'})+' – '+fmtDay(e);
+}
+// Weekdays minus the office day and days taken by team meetings/projects
+function weekCapacity(ws){
+  let avail = 0; const used = new Set();
+  for(let i=0;i<7;i++){
+    const d = addDays(ws,i), wd = parse(d).getDay();
+    if(wd===0 || wd===6 || isOffice(d) || blockOn(d)) continue;
+    avail++;
+    if(db.visits.some(v => v.facilityId && v.date===d)) used.add(d);
+  }
+  return {avail, used: used.size};
+}
+const visitLabel = v => v.facilityId ? (fac(v.facilityId)||{name:'(deleted facility)'}).name : (v.label||'Other');
+const byName = (a,b) => a.name.localeCompare(b.name);
+function typeInfo(t){
+  return t==='remote'
+    ? {short:'Fly', long:'Fly, every '+S().remoteWeeks+' wks', weeks:S().remoteWeeks}
+    : {short:'Drive', long:'Drive, every '+S().localWeeks+' wks', weeks:S().localWeeks};
+}
+function toast(msg){ const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(()=>t.classList.remove('show'), 2200); }
+function download(name, text, type){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------- overdue logic ----------
+function facilityStatus(f){
+  const t = today();
+  const mine = db.visits.filter(v => v.facilityId===f.id);
+  const done = mine.filter(v => v.status==='completed' && v.date<=t).map(v => v.date).sort();
+  const planned = mine.filter(v => v.status==='planned' && v.date>=t).map(v => v.date).sort();
+  const info = typeInfo(f.type);
+  const last = done.length ? done[done.length-1] : null;
+  const due = last ? addDays(last, info.weeks*7) : null;
+  const next = planned[0] || null;
+  const daysLeft = due ? daysBetween(t, due) : null;
+  const level = !last ? 'never' : daysLeft<0 ? 'overdue' : daysLeft<=S().soonDays ? 'soon' : 'ok';
+  const planLate = !!(next && due && next>due);
+  const needsPlan = level!=='ok' && (!next || planLate);
+  return {f, info, last, due, next, daysLeft, level, planLate, needsPlan};
+}
+function allStatus(){
+  return db.facilities.map(facilityStatus).sort((a,b) => {
+    const ka = a.daysLeft==null ? -1e9 : a.daysLeft, kb = b.daysLeft==null ? -1e9 : b.daysLeft;
+    return ka-kb || a.f.name.localeCompare(b.f.name);
+  });
+}
+function statusText(r){
+  if(r.level==='never') return 'No visits logged';
+  if(r.daysLeft<0) return (-r.daysLeft)+' day'+(r.daysLeft===-1?'':'s')+' overdue';
+  if(r.daysLeft===0) return 'Due today';
+  return 'Due in '+r.daysLeft+' day'+(r.daysLeft===1?'':'s');
+}
+const pastPlanned = () => db.visits.filter(v => v.facilityId && v.status==='planned' && v.date<today()).sort((a,b)=>a.date.localeCompare(b.date));
+
+// ---------- views ----------
+function renderStatus(){
+  if(!db.facilities.length) return `<div class="panel">No facilities yet. <button class="primary" data-act="add-fac">Add your first facility</button></div>`;
+  const rows = allStatus();
+  const n = k => rows.filter(r => r.level===k).length;
+  const pend = pastPlanned().length;
+  let h = `<div class="chips">
+    <div class="chip red"><b>${n('overdue')+n('never')}</b>Overdue</div>
+    <div class="chip amber"><b>${n('soon')}</b>Due within ${S().soonDays} days</div>
+    <div class="chip blue"><b>${rows.filter(r=>r.needsPlan).length}</b>Due but not scheduled in time</div>
+  </div>`;
+  if(pend) h += `<div class="banner">${pend} past planned visit${pend>1?'s':''} still need${pend>1?'':'s'} to be marked completed or rescheduled. <button class="small" data-act="tab" data-tab="schedule">Review</button></div>`;
+  h += rows.map(r => `
+    <div class="card ${r.level}">
+      <div class="card-top">
+        <div><div class="fname">${esc(r.f.name)}</div><div class="muted small">${r.f.type==='remote'?'<span class="badge fly">Fly</span> ':''}${esc(r.info.long)}</div></div>
+        <span class="badge ${r.level}">${statusText(r)}</span>
+      </div>
+      <div class="meta">
+        <span>Last visit: <b>${r.last ? fmt(r.last)+'</b> ('+ago(daysBetween(r.last,today()))+')' : '</b>none'}</span>
+        ${r.due ? `<span>Due by: <b>${fmt(r.due)}</b></span>` : ''}
+        <span>Next planned: ${r.next ? `<b>${fmt(r.next)}</b>${r.planLate?' <span class="warn">(after due date)</span>':''}` : (r.level!=='ok' ? '<span class="warn">not scheduled</span>' : '<span class="muted">not scheduled</span>')}</span>
+      </div>
+      <div class="actions">
+        <button class="small" data-act="new-visit" data-fid="${r.f.id}" data-status="planned">Plan visit</button>
+        <button class="small" data-act="new-visit" data-fid="${r.f.id}" data-status="completed">Log completed visit</button>
+      </div>
+    </div>`).join('');
+  return h;
+}
+
+function visitRow(v, opts){
+  opts = opts || {};
+  const f = v.facilityId ? fac(v.facilityId) : null;
+  const done = v.status==='completed';
+  return `<div class="item ${done&&!opts.log?'done':''}">
+    <span class="date">${whenText(v)}</span>
+    <span class="what">${done&&!opts.log?'✓ ':''}${esc(visitLabel(v))}
+      ${f&&f.type==='remote'?' <span class="badge fly">Fly</span>':''}${!v.facilityId?' <span class="badge gray">Other</span>':''}
+      ${opts.log&&f&&f.address?`<div class="muted small">${esc(f.address)}</div>`:''}
+      ${v.notes?`<div class="muted small">${esc(v.notes)}</div>`:''}</span>
+    <span class="actions">
+      ${opts.confirm?`<button class="small primary" data-act="complete" data-id="${v.id}">Completed</button>`:''}
+      ${opts.log&&f&&f.address?`<button class="small" data-act="copy-addr" data-id="${v.id}">Copy address</button>`:''}
+      ${opts.log?`<label class="check small" style="margin:0"><input type="checkbox" class="concur-cb" data-id="${v.id}" ${v.concur?'checked':''}> In Concur</label>`:''}
+      <button class="small" data-act="edit-visit" data-id="${v.id}">${opts.confirm?'Reschedule':'Edit'}</button>
+    </span>
+  </div>`;
+}
+
+function schedRange(){
+  const start = ui.schedStart || mondayOf(today());
+  const weeks = ui.schedWeeks || 6;
+  return {start, weeks, end: addDays(start, weeks*7)}; // end exclusive
+}
+function rangeVisits(r){
+  return db.visits.filter(v => overlaps(v, r.start, r.end)).sort((a,b)=>a.date.localeCompare(b.date) || visitLabel(a).localeCompare(visitLabel(b)));
+}
+function renderSchedule(){
+  const r = schedRange();
+  let h = `<div class="toolbar">
+    <label>Starting week of<input type="date" id="schedStart" value="${r.start}"></label>
+    <label>Show<select id="schedWeeks">${[1,2,3,4,5,6,8,10,12].map(n=>`<option value="${n}" ${n===r.weeks?'selected':''}>${n} week${n>1?'s':''}</option>`).join('')}</select></label>
+    <button class="primary" data-act="new-visit" data-status="planned">+ Plan a visit</button>
+    <button data-act="new-visit" data-status="planned" data-other="1">+ Team meeting / project</button>
+    <span class="grow"></span>
+    <button data-act="email-text">Copy for email</button>
+    <button data-act="ics">Download calendar (.ics)</button>
+  </div>`;
+
+  const pend = pastPlanned();
+  if(pend.length){
+    h += `<h2>Did these happen?</h2><div class="list">${pend.map(v=>visitRow(v,{confirm:true})).join('')}</div>`;
+  }
+
+  // facilities that come due in this window but have no visit in time
+  const gaps = allStatus().filter(s => (s.due==null || s.due<r.end) && s.needsPlan);
+  if(gaps.length){
+    h += `<div class="hint"><b>Coming due by ${fmt(addDays(r.end,-1))} with no visit scheduled in time:</b>
+      <div class="row">${gaps.map(s=>`<button class="small" data-act="new-visit" data-fid="${s.f.id}" data-status="planned" title="${esc(statusText(s))}">+ ${esc(s.f.name)} <span class="badge ${s.level}">${s.due?'due '+fmt(s.due):'never visited'}</span></button>`).join('')}</div></div>`;
+  }
+
+  const vs = rangeVisits(r).filter(v => !(v.facilityId && v.status==='planned' && v.date<today()));
+  for(let w=0; w<r.weeks; w++){
+    const ws = addDays(r.start, w*7), we = addDays(ws, 7);
+    const items = vs.filter(v => overlaps(v, ws, we));
+    const cap = weekCapacity(ws);
+    const capTxt = cap.avail===0 ? 'no visit days available'
+      : cap.used+' of '+cap.avail+' visit day'+(cap.avail===1?'':'s')+' used';
+    h += `<h3>Week of ${fmt(ws)} <span class="cap">· ${capTxt}</span></h3><div class="list">${items.length ? items.map(v=>visitRow(v)).join('') : '<div class="empty">Nothing scheduled</div>'}</div>`;
+  }
+  return h;
+}
+
+function logRange(){
+  const t = parse(today());
+  const from = ui.logFrom || iso(new Date(t.getFullYear(), t.getMonth()-1, 1));
+  const to = ui.logTo || today();
+  return {from, to, open: !!ui.logOpen};
+}
+function logVisits(r){
+  return db.visits.filter(v => v.facilityId && v.status==='completed' && v.date>=r.from && v.date<=r.to && (!r.open || !v.concur))
+    .sort((a,b)=>a.date.localeCompare(b.date));
+}
+function renderLog(){
+  const r = logRange();
+  const vs = logVisits(r);
+  const open = vs.filter(v=>!v.concur).length;
+  return `<div class="toolbar">
+      <label>From<input type="date" id="logFrom" value="${r.from}"></label>
+      <label>To<input type="date" id="logTo" value="${r.to}"></label>
+      <label class="check"><input type="checkbox" id="logOpen" ${r.open?'checked':''}> Only visits not yet in Concur</label>
+      <span class="grow"></span>
+      <button data-act="new-visit" data-status="completed">+ Log a visit</button>
+      <button data-act="csv">Export CSV</button>
+    </div>
+    <p class="muted small">${vs.length} completed visit${vs.length===1?'':'s'} · ${open} not yet entered in Concur. Only completed facility visits appear here.</p>
+    <div class="list">${vs.length ? vs.map(v=>visitRow(v,{log:true})).join('') : '<div class="empty">No completed visits in this range.</div>'}</div>`;
+}
+
+function renderFacilities(){
+  const fs = db.facilities.slice().sort(byName);
+  return `<div class="toolbar"><button class="primary" data-act="add-fac">+ Add facility</button></div>
+    <div class="list">${fs.length ? fs.map(f=>`<div class="item">
+      <span class="what"><b>${esc(f.name)}</b> ${f.type==='remote'?'<span class="badge fly">Fly</span>':''}
+        <div class="muted small">${esc(f.address||'No address')} · ${esc(typeInfo(f.type).long)}</div>
+        ${f.notes?`<div class="muted small">${esc(f.notes)}</div>`:''}</span>
+      <button class="small" data-act="edit-fac" data-id="${f.id}">Edit</button></div>`).join('')
+      : '<div class="empty">No facilities yet.</div>'}</div>`;
+}
+
+function renderSettings(){
+  const s = S();
+  return `<div class="panel">
+      <h2 style="margin-top:0">Visit rules</h2>
+      <div class="row">
+        <label>Drive facilities: visit at least every<input type="number" min="1" max="52" data-set="localWeeks" value="${s.localWeeks}"> weeks</label>
+        <label>Fly facilities: visit at least every<input type="number" min="1" max="52" data-set="remoteWeeks" value="${s.remoteWeeks}"> weeks</label>
+        <label>Show "due soon" when within<input type="number" min="0" max="60" data-set="soonDays" value="${s.soonDays}"> days</label>
+      </div>
+      <label>Office day (no facility visits)<select data-set="officeDay">${[-1,1,2,3,4,5].map(d=>`<option value="${d}" ${d===s.officeDay?'selected':''}>${d<0?'None':DAYS[d]}</option>`).join('')}</select></label>
+      <label>Your name (shown at the top of the email text and calendar)<input data-set="yourName" value="${esc(s.yourName)}"></label>
+    </div>
+    <div class="panel">
+      <h2 style="margin-top:0">Your data</h2>
+      <p class="small">Everything is saved <b>only in this browser on this computer</b>. Nothing is sent anywhere. Export a backup regularly, and use the backup to move to another computer or browser.</p>
+      <p class="small muted">Last backup: ${s.lastBackup ? fmt(s.lastBackup,{month:'short',day:'numeric',year:'numeric'}) : 'never'}</p>
+      <div class="row">
+        <button class="primary" data-act="export">Export backup</button>
+        <button data-act="import">Import backup…</button>
+        <span class="grow"></span>
+        <button class="danger" data-act="wipe">Erase all data</button>
+      </div>
+    </div>`;
+}
+
+function renderBanner(){
+  const s = S();
+  const stale = db.visits.length && (!s.lastBackup || daysBetween(s.lastBackup, today()) > 14);
+  return stale ? `<div class="banner">Your data is only stored in this browser. Last backup: ${s.lastBackup?fmt(s.lastBackup):'never'}.<button class="small" data-act="export">Export backup</button></div>` : '';
+}
+
+function render(){
+  const tab = ui.tab || (db.facilities.length ? 'status' : 'facilities');
+  document.querySelectorAll('#tabs button').forEach(b => {
+    b.classList.toggle('on', b.dataset.tab===tab);
+    if(b.dataset.tab==='status'){
+      const n = db.facilities.map(facilityStatus).filter(r=>r.level==='overdue'||r.level==='never').length;
+      b.innerHTML = 'Status' + (n ? `<span class="count">${n}</span>` : '');
+    }
+  });
+  document.getElementById('banner').innerHTML = renderBanner();
+  document.getElementById('view').innerHTML =
+    ({status:renderStatus, schedule:renderSchedule, log:renderLog, facilities:renderFacilities, settings:renderSettings}[tab])();
+}
+
+// ---------- exports ----------
+function emailText(){
+  const r = schedRange(), s = S();
+  const vs = rangeVisits(r).filter(v => !v.facilityId || v.status==='completed' || v.date>=today());
+  const lines = [];
+  lines.push('Planned visits' + (s.yourName ? ' – '+s.yourName : ''));
+  lines.push(fmt(r.start,{month:'short',day:'numeric'})+' – '+fmt(addDays(r.end,-1),{month:'short',day:'numeric',year:'numeric'})+' (subject to change)');
+  if(s.officeDay>=0) lines.push(DAYS[s.officeDay]+'s are office days.');
+  for(let w=0; w<r.weeks; w++){
+    const ws = addDays(r.start, w*7), we = addDays(ws,7);
+    lines.push('', 'Week of '+fmt(ws));
+    const items = vs.filter(v => overlaps(v, ws, we));
+    if(!items.length) lines.push('  No visits scheduled');
+    items.forEach(v => lines.push('  '+whenText(v)+' – '+visitLabel(v)));
+  }
+  return lines.join('\n');
+}
+const icsEsc = s => String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
+function icsFile(){
+  const r = schedRange(), s = S();
+  const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
+  const out = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Facility Visit Tracker//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
+  rangeVisits(r).filter(v => endOf(v)>=today()).forEach(v => {
+    const f = v.facilityId ? fac(v.facilityId) : null;
+    out.push('BEGIN:VEVENT', 'UID:'+v.id+'@facility-visit-tracker', 'DTSTAMP:'+stamp,
+      'DTSTART;VALUE=DATE:'+v.date.replace(/-/g,''), 'DTEND;VALUE=DATE:'+addDays(endOf(v),1).replace(/-/g,''),
+      'SUMMARY:'+icsEsc((s.yourName?s.yourName+': ':'')+visitLabel(v)+(v.facilityId?' (tentative)':'')));
+    if(f && f.address) out.push('LOCATION:'+icsEsc(f.address));
+    if(v.notes) out.push('DESCRIPTION:'+icsEsc(v.notes));
+    out.push('TRANSP:TRANSPARENT','END:VEVENT');
+  });
+  out.push('END:VCALENDAR');
+  return out.join('\r\n');
+}
+const csvCell = x => { x = String(x==null?'':x); return /[",\n]/.test(x) ? '"'+x.replace(/"/g,'""')+'"' : x; };
+function csvFile(){
+  const rows = [['Date','Facility','Address','Type','Notes','Entered in Concur']];
+  logVisits(logRange()).forEach(v => {
+    const f = fac(v.facilityId);
+    rows.push([v.date, visitLabel(v), f?f.address:'', f?typeInfo(f.type).short:'', v.notes, v.concur?'Yes':'No']);
+  });
+  return rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+}
+
+// ---------- dialogs ----------
+const visitDlg = document.getElementById('visitDlg'), visitForm = document.getElementById('visitForm');
+const facDlg = document.getElementById('facDlg'), facForm = document.getElementById('facForm');
+let editingVisit = null, editingFac = null;
+
+function syncVisitForm(){
+  const other = visitForm.facilityId.value==='';
+  document.getElementById('otherWrap').hidden = !other;
+  document.getElementById('endWrap').hidden = !other;
+  document.getElementById('statusWrap').hidden = other;
+  document.getElementById('concurWrap').hidden = other || visitForm.status.value!=='completed';
+}
+function openVisit(v, defaults){
+  editingVisit = v || null;
+  const d = v || Object.assign({date: today(), facilityId: '', status: 'planned', notes: '', label: '', endDate: '', concur: false}, defaults);
+  const opts = db.facilities.slice().sort(byName).map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('');
+  visitForm.facilityId.innerHTML = opts + '<option value="">Other (team meeting, project, PTO…)</option>';
+  visitForm.date.value = d.date;
+  visitForm.facilityId.value = d.facilityId || '';
+  visitForm.label.value = d.label || '';
+  visitForm.endDate.value = d.endDate || '';
+  visitForm.status.value = d.status;
+  visitForm.notes.value = d.notes || '';
+  visitForm.concur.checked = !!d.concur;
+  document.getElementById('visitTitle').textContent = v ? 'Edit entry' : !d.facilityId ? 'Team meeting / project' : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
+  document.getElementById('visitDel').hidden = !v;
+  syncVisitForm();
+  visitDlg.showModal();
+}
+visitForm.facilityId.addEventListener('change', syncVisitForm);
+visitForm.status.addEventListener('change', syncVisitForm);
+visitForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const f = visitForm;
+  if(!f.date.value) return;
+  if(f.status.value==='completed' && f.date.value>today()){ alert('A completed visit can’t be in the future. Set it to Planned instead.'); return; }
+  if(!f.facilityId.value && !f.label.value.trim()){ alert('Describe what this entry is (for example, Team meeting).'); return; }
+  const isFac = !!f.facilityId.value;
+  if(!isFac && f.endDate.value && f.endDate.value<f.date.value){ alert('The last day can’t be before the first day.'); return; }
+  if(isFac){
+    const block = blockOn(f.date.value);
+    const why = isOffice(f.date.value) ? 'is an office day' : block ? 'is during '+visitLabel(block) : '';
+    if(why && !confirm(fmtDay(f.date.value)+' '+why+'. Schedule the visit anyway?')) return;
+  }
+  const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
+    endDate:isFac?'':f.endDate.value, status:isFac?f.status.value:'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
+  if(editingVisit) Object.assign(editingVisit, data); else db.visits.push(Object.assign({id:uid()}, data));
+  visitDlg.close(); save();
+});
+
+function openFac(f){
+  editingFac = f || null;
+  const s = S();
+  facForm.type.innerHTML = `<option value="local">Drive: visit at least every ${s.localWeeks} weeks</option><option value="remote">Fly: visit at least every ${s.remoteWeeks} weeks</option>`;
+  facForm.name.value = f ? f.name : '';
+  facForm.address.value = f ? f.address||'' : '';
+  facForm.type.value = f ? f.type : 'local';
+  facForm.notes.value = f ? f.notes||'' : '';
+  document.getElementById('facTitle').textContent = f ? 'Edit facility' : 'Add facility';
+  document.getElementById('facDel').hidden = !f;
+  document.getElementById('lookupMsg').innerHTML = '';
+  facDlg.showModal();
+}
+
+// Address lookup: Google via your Worker when GOOGLE_LOOKUP_URL is set, else OpenStreetMap (free, no key).
+// Button-triggered only, per Nominatim's usage policy.
+let lookupResults = [], lookupBusy = false;
+function osmAddress(a){
+  const street = [a.house_number, a.road].filter(Boolean).join(' ');
+  const city = a.city || a.town || a.village || a.hamlet || '';
+  const st = (a['ISO3166-2-lvl4']||'').replace(/^US-/,'') || a.state || '';
+  if(!street && !city) return '';
+  return [street, city, [st, a.postcode].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+}
+async function searchGoogle(q){
+  const r = await fetch(GOOGLE_LOOKUP_URL + '?q=' + encodeURIComponent(q));
+  if(!r.ok) throw new Error('error '+r.status);
+  return ((await r.json()).results || []).map(x => ({addr: x.address, name: x.name, street: /^\d/.test(x.address)}));
+}
+async function searchOsm(q){
+  const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&countrycodes=us&q=' + encodeURIComponent(q));
+  if(!r.ok) throw new Error('error '+r.status);
+  return (await r.json()).map(x => ({addr: osmAddress(x.address||{}), name: x.name||'', street: !!(x.address||{}).house_number}))
+    .filter(x => x.addr);
+}
+async function lookupAddress(){
+  const msg = document.getElementById('lookupMsg');
+  const name = facForm.name.value.trim();
+  if(!name){ toast('Enter the facility name first'); facForm.name.focus(); return; }
+  if(lookupBusy) return;
+  lookupBusy = true;
+  const hint = facForm.address.value.trim();
+  const q = hint ? name+', '+hint : name;
+  let source = '', googleErr = '';
+  try{
+    lookupResults = [];
+    if(GOOGLE_LOOKUP_URL){
+      msg.textContent = 'Searching Google…';
+      try{ lookupResults = await searchGoogle(q); source = 'Google'; }
+      catch(e){ googleErr = e.message; }
+    }
+    if(!lookupResults.length){
+      msg.textContent = 'Searching OpenStreetMap…';
+      lookupResults = await searchOsm(q); source = 'OpenStreetMap';
+    }
+    if(!lookupResults.length){
+      msg.innerHTML = 'No match found. Type the city into the address box and try again, or use Google Maps.';
+      return;
+    }
+    const top = lookupResults[0];
+    facForm.address.value = top.addr;
+    msg.innerHTML = `Filled from ${source}${top.name?' (matched “'+esc(top.name)+'”)':''}. Please check it.`
+      + (googleErr ? ` <span class="muted">(Google lookup unavailable: ${esc(googleErr)})</span>` : '')
+      + (top.street ? '' : ' <span class="warn">No street number found.</span>')
+      + (lookupResults.length>1 ? '<div class="row" style="margin-top:4px">Other matches: '
+        + lookupResults.slice(1).map((x,i) => `<button type="button" class="small" data-act="pick-addr" data-i="${i+1}">${esc(x.name ? x.name+' – ' : '')}${esc(x.addr)}</button>`).join('') + '</div>' : '');
+  }catch(e){
+    msg.textContent = 'Lookup failed (' + e.message + '). Use Google Maps instead.';
+  }finally{
+    lookupBusy = false;
+  }
+}
+facForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const data = {name:facForm.name.value.trim(), address:facForm.address.value.trim(), type:facForm.type.value, notes:facForm.notes.value.trim()};
+  if(!data.name) return;
+  if(editingFac) Object.assign(editingFac, data); else db.facilities.push(Object.assign({id:uid()}, data));
+  facDlg.close(); save();
+});
+
+function showText(title, text){
+  document.getElementById('textTitle').textContent = title;
+  document.getElementById('textOut').value = text;
+  document.getElementById('textDlg').showModal();
+}
+async function copy(text){
+  try{ await navigator.clipboard.writeText(text); toast('Copied'); }
+  catch(e){ toast('Select the text and press Ctrl+C'); }
+}
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act],[data-tab]');
+  if(!b) return;
+  if(b.dataset.tab && !b.dataset.act){ ui.tab = b.dataset.tab; saveUi(); render(); return; }
+  const id = b.dataset.id, v = id ? db.visits.find(x => x.id===id) : null;
+  switch(b.dataset.act){
+    case 'tab': ui.tab = b.dataset.tab; saveUi(); render(); break;
+    case 'close': b.closest('dialog').close(); break;
+    case 'new-visit': openVisit(null, {facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
+    case 'edit-visit': openVisit(v); break;
+    case 'delete-visit':
+      if(editingVisit && confirm('Delete this entry?')){ db.visits = db.visits.filter(x => x!==editingVisit); visitDlg.close(); save(); }
+      break;
+    case 'complete': v.status = 'completed'; save(); toast('Marked completed'); break;
+    case 'copy-addr': copy(fac(v.facilityId).address); break;
+    case 'add-fac': openFac(null); break;
+    case 'lookup': lookupAddress(); break;
+    case 'pick-addr': {
+      const x = lookupResults[+b.dataset.i];
+      if(x){ facForm.address.value = x.addr; document.getElementById('lookupMsg').textContent = 'Address set. Please check it.'; }
+      break;
+    }
+    case 'maps': {
+      const q = facForm.name.value.trim();
+      if(!q){ toast('Enter the facility name first'); facForm.name.focus(); break; }
+      window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q), '_blank', 'noopener');
+      break;
+    }
+    case 'edit-fac': openFac(fac(id)); break;
+    case 'delete-fac': {
+      const n = db.visits.filter(x => x.facilityId===editingFac.id).length;
+      if(confirm(`Delete ${editingFac.name}${n?` and its ${n} visit record${n>1?'s':''}`:''}? This can’t be undone.`)){
+        db.visits = db.visits.filter(x => x.facilityId!==editingFac.id);
+        db.facilities = db.facilities.filter(x => x!==editingFac);
+        facDlg.close(); save();
+      }
+      break;
+    }
+    case 'email-text': showText('Schedule for email', emailText()); break;
+    case 'copy-text': copy(document.getElementById('textOut').value); break;
+    case 'ics': download('visit-schedule.ics', icsFile(), 'text/calendar'); break;
+    case 'csv': { const r = logRange(); download(`visits_${r.from}_to_${r.to}.csv`, csvFile(), 'text/csv'); break; }
+    case 'export':
+      db.settings.lastBackup = today();
+      download(`facility-visits-backup-${today()}.json`, JSON.stringify(db, null, 2), 'application/json');
+      save(); break;
+    case 'import': document.getElementById('importFile').click(); break;
+    case 'wipe':
+      if(confirm('Erase all facilities and visits from this browser? Export a backup first if you might need them.')){ db = blank(); save(); }
+      break;
+  }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if(t.classList.contains('concur-cb')){ const v = db.visits.find(x => x.id===t.dataset.id); if(v){ v.concur = t.checked; save(); } return; }
+  if(t.dataset.set){
+    const k = t.dataset.set;
+    if(k==='yourName') db.settings[k] = t.value.trim();
+    else { const n = parseInt(t.value,10); if(isNaN(n) || (n<0 && k!=='officeDay')) return; db.settings[k] = n; }
+    save(); return;
+  }
+  if(t.id==='schedStart' && t.value){ ui.schedStart = mondayOf(t.value); }
+  else if(t.id==='schedWeeks'){ ui.schedWeeks = parseInt(t.value,10); }
+  else if(t.id==='logFrom'){ ui.logFrom = t.value; }
+  else if(t.id==='logTo'){ ui.logTo = t.value; }
+  else if(t.id==='logOpen'){ ui.logOpen = t.checked; }
+  else return;
+  saveUi(); render();
+});
+document.getElementById('importFile').addEventListener('change', e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if(!file) return;
+  file.text().then(txt => {
+    const d = JSON.parse(txt);
+    if(!Array.isArray(d.facilities) || !Array.isArray(d.visits)) throw new Error('bad');
+    if(!confirm(`Replace the data in this browser with ${d.facilities.length} facilities and ${d.visits.length} visits from this backup?`)) return;
+    db = {facilities:d.facilities, visits:d.visits, settings:Object.assign(blank().settings, d.settings||{})};
+    save(); toast('Backup imported');
+  }).catch(() => alert('That file isn’t a Facility Visit Tracker backup.'));
+});
+
+render();
+</script>
+</body>
+</html>
