@@ -492,6 +492,7 @@ const holidayOn = d => { const y = +d.slice(0,4); return holidaysFor(y)[d] || ho
 const isWeekend = d => { const wd = parse(d).getDay(); return wd===0 || wd===6; };
 // Why a facility visit on this day would be unusual, or '' if it's a normal visit day
 function dayProblem(d){
+  if(d < today()) return '';   // the past is a record, not a plan: nothing to warn about
   const h = holidayOn(d);
   if(h) return 'is '+h;
   if(isWeekend(d)) return 'is a weekend';
@@ -737,7 +738,6 @@ function dropOn(date, item){
   const why = dayProblem(date);
   if(why && !confirm(fmtDay(date)+' '+why+'. Book '+f.name+' anyway?')) return;
   const past = date < today();
-  if(past && !confirm(fmtDay(date)+' is in the past. Record a completed visit to '+f.name+' that day?')) return;
   db.visits.push({id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false});
   save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date));
 }
