@@ -859,7 +859,7 @@ function icsFile(){
       'DTSTART;VALUE=DATE:'+v.date.replace(/-/g,''), 'DTEND;VALUE=DATE:'+addDays(endOf(v),1).replace(/-/g,''),
       'SUMMARY:'+icsEsc((s.yourName?s.yourName+': ':'')+outLabel(v)+(v.facilityId?' (tentative)':'')));
     if(f && f.address) out.push('LOCATION:'+icsEsc(f.address));
-    if(v.notes) out.push('DESCRIPTION:'+icsEsc(v.notes));
+    if(v.notes && kindOf(v)!=='bank') out.push('DESCRIPTION:'+icsEsc(v.notes));   // Bank Day notes stay private
     out.push('TRANSP:TRANSPARENT','END:VEVENT');
   });
   out.push('END:VCALENDAR');
