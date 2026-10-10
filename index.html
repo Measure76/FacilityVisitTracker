@@ -172,16 +172,17 @@ body.placing .day{cursor:copy}
 <dialog id="facDlg">
   <form id="facForm">
     <h2 id="facTitle">Facility</h2>
-    <label>Name
+    <label>Name<input name="name" required></label>
+    <label>Business name (optional: the official name, used to look up the address)
       <span class="row" style="flex-wrap:nowrap;margin-top:3px">
-        <input name="name" required style="margin-top:0;flex:1;min-width:0">
-        <button type="button" data-act="lookup" title="Look up this name and fill in the first address found" style="white-space:nowrap">Fill address ↓</button>
+        <input name="business" placeholder="Leave blank to look up by Name" style="margin-top:0;flex:1;min-width:0">
+        <button type="button" data-act="lookup" title="Look up the business name (or the Name) and fill in the first address found" style="white-space:nowrap">Fill address ↓</button>
       </span>
     </label>
     <label style="margin-bottom:4px">Address (used for the Concur mileage lookup)
       <span class="row" style="flex-wrap:nowrap;margin-top:3px">
         <input name="address" placeholder="Optional: city, to narrow the fill" style="margin-top:0;flex:1;min-width:0">
-        <button type="button" data-act="maps" title="Search Google Maps for the facility name in a new tab, then copy the address back" style="white-space:nowrap"><span class="wide-only">Find on </span>Google Maps ↗</button>
+        <button type="button" data-act="maps" title="Search Google Maps for the business name (or the Name) in a new tab, then copy the address back" style="white-space:nowrap"><span class="wide-only">Find on </span>Google Maps ↗</button>
       </span>
     </label>
     <div id="lookupMsg" class="small muted" style="margin-bottom:10px"></div>
@@ -189,6 +190,20 @@ body.placing .day{cursor:copy}
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
     <div class="dlg-actions">
       <button type="button" class="danger" data-act="delete-fac" id="facDel">Delete</button>
+      <span class="grow"></span>
+      <button type="button" data-act="close">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="batchDlg">
+  <form id="batchForm">
+    <h2>Add several facilities</h2>
+    <label>One facility name per line<textarea name="names" rows="10" placeholder="The Oaks at Lakewood&#10;Rainier Rehabilitation&#10;Puget Sound Transitional Care"></textarea></label>
+    <label>Type for all of these<select name="type"></select></label>
+    <p class="small muted">You can add business names, addresses and notes afterward by clicking Edit on each one.</p>
+    <div class="dlg-actions">
       <span class="grow"></span>
       <button type="button" data-act="close">Cancel</button>
       <button type="submit" class="primary">Save</button>
@@ -798,9 +813,10 @@ function renderLog(){
 
 function renderFacilities(){
   const fs = db.facilities.slice().sort(byName);
-  return `<div class="toolbar"><button class="primary" data-act="add-fac">+ Add facility</button></div>
+  return `<div class="toolbar"><button class="primary" data-act="add-fac">+ Add facility</button><button data-act="add-batch">+ Add several</button></div>
     <div class="list">${fs.length ? fs.map(f=>`<div class="item">
       <span class="what"><b>${esc(f.name)}</b> ${f.type==='remote'?'<span class="badge fly">Fly</span>':''}
+        ${f.business?`<div class="small">${esc(f.business)}</div>`:''}
         <div class="muted small">${esc(f.address||'No address')} · ${esc(typeInfo(f.type).long)}</div>
         ${f.notes?`<div class="muted small">${esc(f.notes)}</div>`:''}</span>
       <button class="small" data-act="edit-fac" data-id="${f.id}">Edit</button></div>`).join('')
@@ -961,6 +977,7 @@ function openFac(f){
   const s = S();
   facForm.type.innerHTML = `<option value="local">Drive: visit at least every ${s.localWeeks} weeks</option><option value="remote">Fly: visit at least every ${s.remoteWeeks} weeks</option>`;
   facForm.name.value = f ? f.name : '';
+  facForm.business.value = f ? f.business||'' : '';
   facForm.address.value = f ? f.address||'' : '';
   facForm.type.value = f ? f.type : 'local';
   facForm.notes.value = f ? f.notes||'' : '';
@@ -993,7 +1010,7 @@ async function searchOsm(q){
 }
 async function lookupAddress(){
   const msg = document.getElementById('lookupMsg');
-  const name = facForm.name.value.trim();
+  const name = facForm.business.value.trim() || facForm.name.value.trim();
   if(!name){ toast('Enter the facility name first'); facForm.name.focus(); return; }
   if(lookupBusy) return;
   lookupBusy = true;
@@ -1028,9 +1045,31 @@ async function lookupAddress(){
     lookupBusy = false;
   }
 }
+const batchDlg = document.getElementById('batchDlg'), batchForm = document.getElementById('batchForm');
+function openBatch(){
+  const s = S();
+  batchForm.type.innerHTML = `<option value="local">Drive: visit at least every ${s.localWeeks} weeks</option><option value="remote">Fly: visit at least every ${s.remoteWeeks} weeks</option>`;
+  batchForm.names.value = '';
+  batchDlg.showModal();
+  batchForm.names.focus();
+}
+batchForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const have = new Set(db.facilities.map(f => f.name.toLowerCase()));
+  let added = 0, skipped = 0;
+  batchForm.names.value.split(/\r?\n/).map(x => x.trim().replace(/\s+/g, ' ')).filter(Boolean).forEach(name => {
+    if(have.has(name.toLowerCase())){ skipped++; return; }   // already a facility, or listed twice
+    have.add(name.toLowerCase());
+    db.facilities.push({id:uid(), name, business:'', address:'', type:batchForm.type.value, notes:''});
+    added++;
+  });
+  batchDlg.close();
+  if(added) save();
+  toast(`Added ${added} facilit${added===1?'y':'ies'}` + (skipped ? ` · skipped ${skipped} already on the list` : ''));
+});
 facForm.addEventListener('submit', e => {
   e.preventDefault();
-  const data = {name:facForm.name.value.trim(), address:facForm.address.value.trim(), type:facForm.type.value, notes:facForm.notes.value.trim()};
+  const data = {name:facForm.name.value.trim(), business:facForm.business.value.trim(), address:facForm.address.value.trim(), type:facForm.type.value, notes:facForm.notes.value.trim()};
   if(!data.name) return;
   if(editingFac) Object.assign(editingFac, data); else db.facilities.push(Object.assign({id:uid()}, data));
   facDlg.close(); save();
@@ -1076,6 +1115,7 @@ document.addEventListener('click', e => {
     case 'complete': v.status = 'completed'; save(); toast('Marked completed'); break;
     case 'copy-addr': copy(fac(v.facilityId).address); break;
     case 'add-fac': openFac(null); break;
+    case 'add-batch': openBatch(); break;
     case 'lookup': lookupAddress(); break;
     case 'pick-addr': {
       const x = lookupResults[+b.dataset.i];
@@ -1083,7 +1123,7 @@ document.addEventListener('click', e => {
       break;
     }
     case 'maps': {
-      const q = facForm.name.value.trim();
+      const q = facForm.business.value.trim() || facForm.name.value.trim();
       if(!q){ toast('Enter the facility name first'); facForm.name.focus(); break; }
       window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q), '_blank', 'noopener');
       break;
