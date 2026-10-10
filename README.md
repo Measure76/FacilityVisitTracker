@@ -8,7 +8,7 @@ A single-page app for planning and logging facility visits.
 
 ## Address lookup
 
-**Fill address** looks up the facility name and fills in the first address it finds. Out of the box it uses OpenStreetMap, which is free but misses many businesses. To use Google instead, follow [worker/SETUP.md](worker/SETUP.md) and then set `GOOGLE_LOOKUP_URL` at the top of `index.html`.
+**Fill address** looks up the facility name and fills in the first address it finds. Out of the box it uses OpenStreetMap, which is free but misses many businesses. Google lookups go through a Cloudflare Worker that holds the Google Places API key (see the comments at the top of [worker/worker.js](worker/worker.js)). The Worker's address is set in `GOOGLE_LOOKUP_URL` at the top of `index.html`; leave it empty to use OpenStreetMap only.
 
 ## Your data stays in your browser
 
