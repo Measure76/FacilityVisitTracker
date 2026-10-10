@@ -8,7 +8,11 @@ A single-page app for planning and logging facility visits.
 
 ## Address lookup
 
-**Fill address** looks up the facility name and fills in the first address it finds. Out of the box it uses OpenStreetMap, which is free but misses many businesses. Google lookups and data storage go through a Cloudflare Worker that holds the Google Places API key, the team passcode and a D1 database (see the comments at the top of [worker/worker.js](worker/worker.js)). The Worker's address is set in `GOOGLE_LOOKUP_URL` at the top of `index.html`; leave it empty to use OpenStreetMap only.
+**Fill address** looks up the facility name and fills in the first address it finds, using Google Places and falling back to OpenStreetMap.
+
+## Server
+
+Data storage and Google lookups go through a Cloudflare Worker ([worker/worker.js](worker/worker.js)), which holds the Google Places API key, the team passcode and a D1 database. The comments at the top of that file list its settings. The Worker's address is set in `SERVER_URL` at the top of `index.html`.
 
 ## Your data
 
@@ -18,6 +22,5 @@ Each person signs in with the team passcode and their name. Their tracker is sav
 
 1. Create a repository and add `index.html`.
 2. Go to **Settings → Pages → Deploy from a branch**, then choose `main` and `/ (root)`.
-3. Share the `https://<user>.github.io/<repo>/` link. Each coworker gets their own empty tracker.
+3. Add `https://<user>.github.io` to the Worker's `ALLOWED_ORIGINS`, then share the `https://<user>.github.io/<repo>/` link.
 
-You can also just open `index.html` straight from disk.
