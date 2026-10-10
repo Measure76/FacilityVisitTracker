@@ -172,17 +172,17 @@ body.placing .day{cursor:copy}
 <dialog id="facDlg">
   <form id="facForm">
     <h2 id="facTitle">Facility</h2>
-    <label>Name<input name="name" required></label>
+    <label>Nickname (what the calendar and lists show)<input name="name" required></label>
     <label>Business name (optional: the official name, used to look up the address)
       <span class="row" style="flex-wrap:nowrap;margin-top:3px">
-        <input name="business" placeholder="Leave blank to look up by Name" style="margin-top:0;flex:1;min-width:0">
-        <button type="button" data-act="lookup" title="Look up the business name (or the Name) and fill in the first address found" style="white-space:nowrap">Fill address ↓</button>
+        <input name="business" placeholder="Leave blank to look up by Nickname" style="margin-top:0;flex:1;min-width:0">
+        <button type="button" data-act="lookup" title="Look up the business name (or the Nickname) and fill in the first address found" style="white-space:nowrap">Fill address ↓</button>
       </span>
     </label>
     <label style="margin-bottom:4px">Address (used for the Concur mileage lookup)
       <span class="row" style="flex-wrap:nowrap;margin-top:3px">
         <input name="address" placeholder="Optional: city, to narrow the fill" style="margin-top:0;flex:1;min-width:0">
-        <button type="button" data-act="maps" title="Search Google Maps for the business name (or the Name) in a new tab, then copy the address back" style="white-space:nowrap"><span class="wide-only">Find on </span>Google Maps ↗</button>
+        <button type="button" data-act="maps" title="Search Google Maps for the business name (or the Nickname) in a new tab, then copy the address back" style="white-space:nowrap"><span class="wide-only">Find on </span>Google Maps ↗</button>
       </span>
     </label>
     <div id="lookupMsg" class="small muted" style="margin-bottom:10px"></div>
@@ -200,9 +200,9 @@ body.placing .day{cursor:copy}
 <dialog id="batchDlg">
   <form id="batchForm">
     <h2>Add several facilities</h2>
-    <label>One facility name per line<textarea name="names" rows="10" placeholder="The Oaks at Lakewood&#10;Rainier Rehabilitation&#10;Puget Sound Transitional Care"></textarea></label>
+    <label>One nickname per line<textarea name="names" rows="10" placeholder="Oaks&#10;Rainier Rehab&#10;Puget Sound TC"></textarea></label>
     <label>Type for all of these<select name="type"></select></label>
-    <p class="small muted">You can add business names, addresses and notes afterward by clicking Edit on each one.</p>
+    <p class="small muted">Business names (for the address lookup), addresses and notes can be added afterward with Edit.</p>
     <div class="dlg-actions">
       <span class="grow"></span>
       <button type="button" data-act="close">Cancel</button>
@@ -1011,7 +1011,7 @@ async function searchOsm(q){
 async function lookupAddress(){
   const msg = document.getElementById('lookupMsg');
   const name = facForm.business.value.trim() || facForm.name.value.trim();
-  if(!name){ toast('Enter the facility name first'); facForm.name.focus(); return; }
+  if(!name){ toast('Enter a nickname or business name first'); facForm.name.focus(); return; }
   if(lookupBusy) return;
   lookupBusy = true;
   const hint = facForm.address.value.trim();
@@ -1124,7 +1124,7 @@ document.addEventListener('click', e => {
     }
     case 'maps': {
       const q = facForm.business.value.trim() || facForm.name.value.trim();
-      if(!q){ toast('Enter the facility name first'); facForm.name.focus(); break; }
+      if(!q){ toast('Enter a nickname or business name first'); facForm.name.focus(); break; }
       window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q), '_blank', 'noopener');
       break;
     }
