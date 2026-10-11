@@ -250,7 +250,7 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
     <h2>Change PIN</h2>
     <label>Current PIN<input name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="4"></label>
     <label>New PIN<input name="newPin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4"></label>
-    <label>New PIN again<input name="newPin2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4"></label>
+    <label>Confirm new PIN<input name="newPin2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4"></label>
     <p class="small warn" id="pinMsg"></p>
     <div class="dlg-actions">
       <span class="grow"></span>
@@ -534,13 +534,13 @@ function showSignIn(msg, mode){
       <p class="small">Forgot your PIN? Ask an admin for a reset code, then ${to('reset', 'enter it here')}.</p>`,
     signup: `<h2 style="margin-top:0">Create an account</h2>${id}
       <label>Your name<input name="name" maxlength="60" autocomplete="name" placeholder="First and last name"></label>
-      ${pin('Choose a PIN', 'pin', 'new-password')}${pin('PIN again', 'pin2', 'new-password')}
+      ${pin('Choose a PIN', 'pin', 'new-password')}${pin('Confirm PIN', 'pin2', 'new-password')}
       <button class="primary" type="submit">Create account</button>
       <p class="small">Already have an account? ${to('signin', 'Sign in')}</p>`,
     reset: `<h2 style="margin-top:0">Choose a new PIN</h2>
       <p class="small muted">Enter the 6-digit code an admin gave you. It works once and expires after 24 hours.</p>${id}
       <label>Reset code<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
-      ${pin('New PIN', 'pin', 'new-password')}${pin('PIN again', 'pin2', 'new-password')}
+      ${pin('New PIN', 'pin', 'new-password')}${pin('Confirm PIN', 'pin2', 'new-password')}
       <button class="primary" type="submit">Set PIN and sign in</button>
       <p class="small">${to('signin', 'Back to sign in')}</p>`,
   };
