@@ -21,6 +21,7 @@
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}   /* labels and .check rows set display, which would otherwise override hidden */
+html{scrollbar-gutter:stable}   /* no sideways jump when a tab is short enough to lose the scrollbar */
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 .wrap{max-width:960px;margin:0 auto;padding:16px}
 header h1{font-size:20px;margin:0 0 12px}
@@ -88,7 +89,8 @@ dialog h2{margin-top:0}
 .dlg-actions{display:flex;gap:8px;margin-top:6px}
 textarea.out{width:100%;height:300px;font:13px/1.4 ui-monospace,Consolas,monospace}
 .palette{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 6px}
-body[data-view=schedule] .wrap{max-width:1240px}
+/* The schedule spreads wider than the page, evenly both sides, so the title and tabs stay put */
+body[data-view=schedule] #view{width:min(1240px, calc(100vw - 32px));margin-left:calc(50% - min(620px, 50vw - 16px))}
 .sched{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;align-items:start;margin-top:12px}
 .side{position:sticky;top:8px;max-height:calc(100vh - 16px);overflow-y:auto}
 .side h3{margin-top:0}
