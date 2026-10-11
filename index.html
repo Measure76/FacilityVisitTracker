@@ -74,6 +74,8 @@ h3{font-size:14px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;
 .item .date{min-width:92px;flex-shrink:0;font-variant-numeric:tabular-nums}
 .item .what{flex:1;min-width:150px}
 .item.done .what{color:var(--muted)}
+.item.click{cursor:pointer}
+.item.click:hover,.item.click:focus-visible{background:rgba(127,127,127,.08)}
 .empty{padding:12px;color:var(--muted)}
 .banner{background:var(--amber-bg);color:var(--amber);border-radius:8px;padding:8px 12px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px}
@@ -226,10 +228,10 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 
 <dialog id="batchDlg">
   <form id="batchForm">
-    <h2>Add several facilities</h2>
+    <h2>Add Facilities</h2>
     <label>One nickname per line<textarea name="names" rows="10" placeholder="Boring Transitional Care&#10;Peculiar Rehabilitation&#10;Truth or Consequences Senior Living"></textarea></label>
     <label>Type for all of these<select name="type"></select></label>
-    <p class="small muted">Business names (for the address lookup), addresses and notes can be added afterward with Edit.</p>
+    <p class="small muted">Business names (for the address lookup), addresses and notes can be added afterward by tapping the facility.</p>
     <div class="dlg-actions">
       <span class="grow"></span>
       <button type="button" data-act="close">Cancel</button>
@@ -738,7 +740,7 @@ const isDone = v => v.date <= today();
 
 // ---------- views ----------
 function renderStatus(){
-  if(!db.facilities.length) return `<div class="panel">No facilities yet. <button class="primary" data-act="add-fac">Add your first facility</button></div>`;
+  if(!db.facilities.length) return `<div class="panel">No facilities yet. <button class="primary" data-act="add-batch">+ Add Facilities</button></div>`;
   const rows = allStatus();
   const n = k => rows.filter(r => r.level===k).length;
   let h = `<div class="chips">
@@ -966,7 +968,10 @@ document.addEventListener('drop', e => {
   if(placing) setPlacing(null);
   dropOn(day.dataset.date, item);
 });
-document.addEventListener('keydown', e => { if(e.key==='Escape' && placing) setPlacing(null); });
+document.addEventListener('keydown', e => {
+  if(e.key==='Escape' && placing) setPlacing(null);
+  if((e.key==='Enter' || e.key===' ') && e.target.matches('.item.click')){ e.preventDefault(); e.target.click(); }
+});
 
 function logRange(){
   const t = parse(today());
@@ -996,13 +1001,12 @@ function renderLog(){
 
 function renderFacilities(){
   const fs = db.facilities.slice().sort(byName);
-  return `<div class="toolbar"><button class="primary" data-act="add-fac">+ Add facility</button><button data-act="add-batch">+ Add several</button></div>
-    <div class="list">${fs.length ? fs.map(f=>`<div class="item">
+  return `<div class="toolbar"><button class="primary" data-act="add-batch">+ Add Facilities</button></div>
+    <div class="list">${fs.length ? fs.map(f=>`<div class="item click" data-act="edit-fac" data-id="${f.id}" role="button" tabindex="0">
       <span class="what"><b>${esc(f.name)}</b> ${f.type==='remote'?'<span class="badge fly">Fly</span>':''}${f.ancillary?` <span class="badge ancillary" title="${ANC_TIP}">Ancillary</span>`:''}
         ${f.business?`<div class="small">${esc(f.business)}</div>`:''}
         <div class="muted small">${esc(f.address||'No address')} · ${esc(typeInfo(f.type).long)}</div>
-        ${f.notes?`<div class="muted small">${esc(f.notes)}</div>`:''}</span>
-      <button class="small" data-act="edit-fac" data-id="${f.id}">Edit</button></div>`).join('')
+        ${f.notes?`<div class="muted small">${esc(f.notes)}</div>`:''}</span></div>`).join('')
       : '<div class="empty">No facilities yet.</div>'}</div>
     <h2>Trips</h2>
     <p class="small muted">Facilities you always visit together on set days, with any travel days. Suggestions keep a trip together and start it on its usual weekday; drag a trip onto the calendar to book every day at once.</p>
