@@ -111,9 +111,7 @@ body[data-view=schedule] .wrap{max-width:1240px}
 .calwrap{overflow-x:auto;margin-bottom:16px}
 .cal{display:grid;grid-template-columns:minmax(0,.45fr) repeat(5,minmax(0,1fr)) minmax(0,.45fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:600px}
 .cal .dow{background:var(--gray-bg);font-size:12px;color:var(--muted);padding:4px;text-align:center}
-.cal .wk{grid-column:1/-1;background:var(--bg);font-size:12px;color:var(--muted);padding:6px 6px 3px}
-.cal .mon{grid-column:1/-1;background:var(--bg);font-size:16px;font-weight:700;color:var(--text);padding:12px 6px 0}
-.cal .mon + .wk{padding-top:2px}
+.cal .mon{grid-column:1/-1;background:var(--bg);font-size:16px;font-weight:700;color:var(--text);padding:12px 6px 6px}
 .day{background:var(--panel);min-height:78px;padding:4px;min-width:0;font-size:12px}
 .day.weekend,.day.office{background:var(--gray-bg)}
 .day.holiday{background:var(--amber-bg)}
@@ -1044,12 +1042,10 @@ function renderSchedule(){
   h += '<div class="calwrap"><div class="cal">' + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="dow">${d}</div>`).join('');
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7);
-    const cap = weekCapacity(ws);
     // Month banner above the week holding a 1st (and above the first week shown); in that week,
     // the days still in the previous month get faded numbers
     const monthStart = [0,1,2,3,4,5,6].map(i => addDays(ws, i)).find(d => d.endsWith('-01'));
     if(monthStart || w===0) h += `<div class="mon">${parse(monthStart || ws).toLocaleDateString(undefined, {month:'long', year:'numeric'})}</div>`;
-    h += `<div class="wk">Week of ${fmt(addDays(ws,1))} · ${cap.avail===0 ? 'no visit days available' : cap.used+' of '+cap.avail+' visit day'+(cap.avail===1?'':'s')+' used'}</div>`;
     for(let i=0; i<7; i++){
       const d = addDays(ws, i), wd = parse(d).getDay();
       const hol = holidayOn(d), weekend = wd===0 || wd===6, office = !weekend && officeHappens(d);
