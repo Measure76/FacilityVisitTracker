@@ -940,8 +940,8 @@ function renderStatus(){
   const late = n('overdue')+n('never');
   let h = `<div class="chips">
     <div class="chip green"><b>${rows.length-late}<small> of ${rows.length}</small></b>In good standing</div>
-    <div class="chip red"><b>${n('overdue')+n('never')}</b>Overdue</div>
     <div class="chip amber"><b>${n('soon')}</b>Due within ${S().soonDays} days</div>
+    <div class="chip red"><b>${n('overdue')+n('never')}</b>Overdue</div>
   </div>`;
   h += rows.map(r => `
     <div class="card ${r.level}">
