@@ -51,7 +51,7 @@ label.check{display:flex;gap:8px;align-items:center;color:var(--text);font-size:
 .chip{padding:8px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--border);min-width:120px}
 .chip b{display:block;font-size:22px;line-height:1.1}
 .chip b small{font-size:14px;font-weight:600}
-.chip.green b{color:var(--green)} .chip.red b{color:var(--red)} .chip.amber b{color:var(--amber)} .chip.blue b{color:var(--blue)}
+.chip.green b{color:var(--green)} .chip.red b{color:var(--red)} .chip.amber b{color:var(--amber)}
 .card{background:var(--panel);border:1px solid var(--border);border-left:5px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px}
 .card.overdue,.card.never{border-left-color:var(--red)} .card.soon{border-left-color:var(--amber)} .card.ok{border-left-color:var(--green)} .card.ancillary{border-left-color:var(--border)}
 .badge.ancillary{background:var(--gray-bg);color:var(--muted);cursor:help}
@@ -911,8 +911,7 @@ function facilityStatus(f){
   const daysLeft = due ? daysBetween(t, due) : null;
   const level = f.ancillary ? 'ancillary' : !last ? 'never' : daysLeft<0 ? 'overdue' : daysLeft<=S().soonDays ? 'soon' : 'ok';
   const planLate = !!(next && due && next>due);
-  const needsPlan = level!=='ok' && level!=='ancillary' && (!next || planLate);
-  return {f, info, last, due, next, daysLeft, level, planLate, needsPlan};
+  return {f, info, last, due, next, daysLeft, level, planLate};
 }
 function allStatus(){
   return db.facilities.map(facilityStatus).sort((a,b) => {
@@ -943,7 +942,6 @@ function renderStatus(){
     <div class="chip green"><b>${rows.length-late}<small> of ${rows.length}</small></b>In good standing</div>
     <div class="chip red"><b>${n('overdue')+n('never')}</b>Overdue</div>
     <div class="chip amber"><b>${n('soon')}</b>Due within ${S().soonDays} days</div>
-    <div class="chip blue"><b>${rows.filter(r=>r.needsPlan).length}</b>Due but not scheduled in time</div>
   </div>`;
   h += rows.map(r => `
     <div class="card ${r.level}">
