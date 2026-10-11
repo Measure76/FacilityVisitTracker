@@ -112,6 +112,8 @@ body[data-view=schedule] .wrap{max-width:1240px}
 .cal{display:grid;grid-template-columns:minmax(0,.45fr) repeat(5,minmax(0,1fr)) minmax(0,.45fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:600px}
 .cal .dow{background:var(--gray-bg);font-size:12px;color:var(--muted);padding:4px;text-align:center}
 .cal .wk{grid-column:1/-1;background:var(--bg);font-size:12px;color:var(--muted);padding:6px 6px 3px}
+.cal .mon{grid-column:1/-1;background:var(--bg);font-size:16px;font-weight:700;color:var(--text);padding:12px 6px 0}
+.cal .mon + .wk{padding-top:2px}
 .day{background:var(--panel);min-height:78px;padding:4px;min-width:0;font-size:12px}
 .day.weekend,.day.office{background:var(--gray-bg)}
 .day.holiday{background:var(--amber-bg)}
@@ -119,6 +121,9 @@ body[data-view=schedule] .wrap{max-width:1240px}
 body.placing .day{cursor:copy}
 .dnum{font-weight:600}
 .day.past .dnum{color:var(--muted);font-weight:normal}
+.day.mstart{box-shadow:inset 3px 0 0 var(--accent)}
+.day.mstart .dnum{color:var(--accent);font-weight:700}
+.day.othermonth .dnum{color:var(--muted);font-weight:normal;opacity:.6}
 .day.today .dnum{background:var(--accent);color:var(--accent-text);border-radius:9px;padding:0 6px}
 .dtag{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .day.holiday .dtag{color:var(--amber);font-weight:600}
@@ -1031,11 +1036,16 @@ function renderSchedule(){
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7);
     const cap = weekCapacity(ws);
+    // Month banner above the week holding a 1st (and above the first week shown); in that week,
+    // the days still in the previous month get faded numbers
+    const monthStart = [0,1,2,3,4,5,6].map(i => addDays(ws, i)).find(d => d.endsWith('-01'));
+    if(monthStart || w===0) h += `<div class="mon">${parse(monthStart || ws).toLocaleDateString(undefined, {month:'long', year:'numeric'})}</div>`;
     h += `<div class="wk">Week of ${fmt(addDays(ws,1))} · ${cap.avail===0 ? 'no visit days available' : cap.used+' of '+cap.avail+' visit day'+(cap.avail===1?'':'s')+' used'}</div>`;
     for(let i=0; i<7; i++){
       const d = addDays(ws, i), wd = parse(d).getDay();
       const hol = holidayOn(d), weekend = wd===0 || wd===6, office = !weekend && officeHappens(d);
-      const cls = ['day', weekend?'weekend':'', office?'office':'', hol?'holiday':'', d<t?'past':'', d===t?'today':''].filter(Boolean).join(' ');
+      const cls = ['day', weekend?'weekend':'', office?'office':'', hol?'holiday':'', d<t?'past':'', d===t?'today':'',
+        d.endsWith('-01')?'mstart':'', monthStart && d<monthStart?'othermonth':''].filter(Boolean).join(' ');
       const num = (i===0 && w===0) || d.endsWith('-01') ? fmt(d) : String(parse(d).getDate());
       const tag = hol || (office ? 'Office day' : '');
       const events = vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
