@@ -287,6 +287,7 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 <dialog id="textDlg">
   <h2 id="textTitle">Copy</h2>
   <p class="muted small">You can edit this before copying.</p>
+  <p class="warn small" id="textWarn" hidden></p>
   <textarea class="out" id="textOut"></textarea>
   <div class="dlg-actions"><span class="grow"></span>
     <button type="button" data-act="close">Close</button>
@@ -1358,6 +1359,18 @@ function emailText(){
   }
   return lines.join('\n');
 }
+// We're asked for a 4-week tentative schedule after the current week. Flag any of those
+// weeks that has open visit days but nothing on it yet.
+function emailWarning(){
+  const r = emailRange();
+  const empty = [];
+  for(let w=1; w<r.weeks; w++){
+    const ws = addDays(r.start, w*7);
+    if(weekCapacity(ws).avail && !db.visits.some(v => overlaps(v, ws, addDays(ws,7)))) empty.push(fmt(addDays(ws,1),{month:'short',day:'numeric'}));
+  }
+  if(r.weeks-1 !== 4) return 'This shows '+(r.weeks-1)+' tentative weeks; 4 are required.';
+  return empty.length ? 'A 4-week tentative schedule is required. Nothing is planned yet for the week'+(empty.length>1?'s':'')+' of '+empty.join(', ')+'.' : '';
+}
 const icsEsc = s => String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
 function icsFile(){
   const r = schedRange(), s = S();
@@ -1581,8 +1594,10 @@ facForm.addEventListener('submit', e => {
   facDlg.close(); save();
 });
 
-function showText(title, text){
+function showText(title, text, warning){
   document.getElementById('textTitle').textContent = title;
+  const w = document.getElementById('textWarn');
+  w.textContent = warning || ''; w.hidden = !warning;
   document.getElementById('textOut').value = text;
   document.getElementById('textDlg').showModal();
 }
@@ -1656,7 +1671,7 @@ document.addEventListener('click', async e => {
       }
       break;
     }
-    case 'email-text': showText('Schedule for email', emailText()); break;
+    case 'email-text': showText('Schedule for email', emailText(), emailWarning()); break;
     case 'copy-text': copy(document.getElementById('textOut').value); break;
     case 'ics': download('visit-schedule.ics', icsFile(), 'text/calendar'); break;
     case 'csv': { const r = logRange(); download(`visits_${r.from}_to_${r.to}.csv`, csvFile(), 'text/csv'); break; }
