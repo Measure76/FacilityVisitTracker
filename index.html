@@ -137,6 +137,9 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .ev.sug{background:none;border:1px dashed var(--border);border-left:1px dashed var(--border);color:var(--muted);font-style:italic}
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
 .pchip.trip{border-left-color:var(--accent);background:var(--gray-bg)}
+.tut h2{margin:0 0 6px}
+.tut ul{margin:6px 0 10px;padding-left:20px}
+.tut li{margin-bottom:4px}
 .trip-day{margin-bottom:6px;flex-wrap:nowrap}
 .trip-day .dname{width:34px;color:var(--muted);font-size:13px}
 .trip-day select{flex:1;min-width:0}
@@ -155,6 +158,7 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
     <button data-tab="log">Visit log</button>
     <button data-tab="facilities">Facilities</button>
     <button data-tab="settings">Data &amp; settings</button>
+    <button data-tab="tutorial">Tutorial</button>
   </nav>
   <div id="banner"></div>
   <main id="view"></main>
@@ -1041,6 +1045,47 @@ function renderSettings(){
     </div>`;
 }
 
+function renderTutorial(){
+  const go = (tab, label) => `<button class="small" data-act="tab" data-tab="${tab}">${label} →</button>`;
+  return `<p class="muted">Four steps to get your tracker set up and keep it current.</p>
+    <div class="panel tut">
+      <h2>Step 1 · Add your facilities</h2>
+      <ul>
+        <li>On the Facilities tab, tap <b>+ Add Facilities</b> and paste the nicknames, one per line.</li>
+        <li>Choose Drive or Fly for the batch. Drive facilities are due every ${S().localWeeks} weeks, Fly every ${S().remoteWeeks}.</li>
+        <li>Tap any facility later to add its business name and address. <b>Fill address</b> looks the address up for you.</li>
+      </ul>
+      ${go('facilities', 'Facilities')}
+    </div>
+    <div class="panel tut">
+      <h2>Step 2 · Record last month's visits</h2>
+      <ul>
+        <li>On the Schedule tab, use ◀ to go back to last month.</li>
+        <li>Drag each facility from the list onto the day you visited it. On a phone, tap the facility, then tap the day.</li>
+        <li>Keep going until every facility has at least one visit. The Status tab shows "No visits logged" for any you've missed.</li>
+      </ul>
+      ${go('schedule', 'Schedule')}
+    </div>
+    <div class="panel tut">
+      <h2>Step 3 · Build your schedule</h2>
+      <ul>
+        <li>Tap <b>This week</b> and drag facilities onto the days you plan to visit. The list is sorted soonest due first.</li>
+        <li>Gray dashed suggestions fill the open days. Tap one that makes sense to book it.</li>
+        <li>Add team meetings, PTO, Bank Days and Travel Days with the buttons above the calendar. Drag anything on the calendar to move it.</li>
+      </ul>
+      ${go('schedule', 'Schedule')}
+    </div>
+    <div class="panel tut">
+      <h2>Step 4 · Set up regular trips</h2>
+      <ul>
+        <li>If you visit some facilities together, in the same order, build a trip under <b>Trips</b> at the bottom of the Facilities tab.</li>
+        <li>Pick the weekday it usually starts on and add each day in order, including travel days.</li>
+        <li>Suggestions then keep the trip together, and dragging the trip onto the calendar books every day at once.</li>
+      </ul>
+      ${go('facilities', 'Facilities')}
+    </div>`;
+}
+
 function renderBanner(){
   if(!ready || sync.state!=='offline') return '';
   return `<div class="banner">Changes aren’t saved to the server yet (${esc(sync.error)}). They’re kept in this browser and will save when the connection is back.<button class="small" data-act="retry-push">Retry now</button></div>`;
@@ -1061,7 +1106,7 @@ function render(){
   });
   document.getElementById('banner').innerHTML = renderBanner();
   document.getElementById('view').innerHTML =
-    ({status:renderStatus, schedule:renderSchedule, log:renderLog, facilities:renderFacilities, settings:renderSettings}[tab])();
+    ({status:renderStatus, schedule:renderSchedule, log:renderLog, facilities:renderFacilities, settings:renderSettings, tutorial:renderTutorial}[tab])();
   if(tab==='schedule') sizeEventLabels();
 }
 // Stretch each event name from its first cell to the end of its bar in that week, so it

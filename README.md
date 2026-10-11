@@ -6,6 +6,7 @@ A single-page app for planning and logging facility visits.
 - **Schedule** – a Sunday-to-Saturday calendar (narrow weekends, office days and team holidays marked). The sidebar lists every facility, soonest due first (a booking counts as a visit); drag one onto a day to book it. Gray dashed suggestions fill the open days, earliest-due first and recalculated on every change; click one to book it. Team meeting/project, PTO, Bank Day and Travel Day buttons sit above the calendar (Bank Days show as PTO in the email and .ics), or tap it and then tap a day on a phone; drag anything on the calendar to move it. Each week shows how many visit days are left. One click copies the schedule for email or downloads a calendar (.ics) file.
 - **Facilities** – each has a nickname (shown on the calendar and lists) and an optional business name used to look up its address. **Add Facilities** takes a list of nicknames, one per line; tap a facility to add its business name and address, or to change anything else.
 - **Trips** – facilities always visited together on set weekdays, with travel days (e.g. Tue Park Manor → Wed Travel Day). Suggestions keep a trip together and start it on its usual weekday; drag a trip onto the calendar, or click a suggested one, to book every day at once.
+- **Tutorial** – four setup steps: add facilities, record last month's visits, build the schedule, and set up trips.
 - **Visit log** – completed visits by date range with addresses, an "entered in Concur" checkbox, and CSV export for expense reconciliation.
 
 ## Address lookup
