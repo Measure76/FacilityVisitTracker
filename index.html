@@ -873,6 +873,13 @@ function renderSchedule(){
 
 // ---------- drag & drop / tap-to-place ----------
 let placing = null;   // {kind:'fac', fid} | {kind:'team'|'pto'|'bank'} while waiting for a day tap
+// A dropped trip starts on its usual weekday in the week it was dropped into. If that would
+// land in the past when the drop itself was today or later, use next week's instead.
+function snapToTripStart(t, d){
+  let start = addDays(sundayOf(d), t.startDay);
+  if(start < today() && d >= today()) start = addDays(start, 7);
+  return start;
+}
 async function bookTrip(t, start){
   const ds = tripDates(t, start);
   const problems = ds.map((d, i) => { const why = dayProblem(d); return why ? fmtDay(d)+' '+why : ''; }).filter(Boolean);
@@ -885,7 +892,7 @@ async function bookTrip(t, start){
   save(); toast('Booked '+t.name+': '+fmt(ds[0])+' – '+fmt(ds[ds.length-1]));
 }
 async function dropOn(date, item){
-  if(item.kind==='trip'){ const t = tripById(item.tid); if(t) bookTrip(t, date); return; }
+  if(item.kind==='trip'){ const t = tripById(item.tid); if(t) bookTrip(t, snapToTripStart(t, date)); return; }
   if(item.kind==='team'){
     openVisit(null, {facilityId:'', kind:'team', date, endDate:date, status:'planned'});
     return;
