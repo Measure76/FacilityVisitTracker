@@ -20,6 +20,7 @@
   }
 }
 *{box-sizing:border-box}
+[hidden]{display:none !important}   /* labels and .check rows set display, which would otherwise override hidden */
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 .wrap{max-width:960px;margin:0 auto;padding:16px}
 header h1{font-size:20px;margin:0 0 12px}
@@ -128,6 +129,8 @@ body.placing .day{cursor:copy}
 .ev.team.first{border-radius:4px 0 0 4px;margin-left:0;width:calc(100% + 4px);padding-left:5px}
 .ev.team.last{border-radius:0 4px 4px 0;margin-right:0;width:calc(100% + 4px)}
 .ev.team.first.last{border-radius:4px;width:100%}
+#askMsg{white-space:pre-line;margin:4px 0 16px}
+button.danger-fill{background:var(--red);border-color:var(--red);color:var(--panel)}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 @media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
@@ -209,6 +212,16 @@ body.placing .day{cursor:copy}
   </form>
 </dialog>
 
+<dialog id="askDlg">
+  <h2 id="askTitle"></h2>
+  <p id="askMsg"></p>
+  <div class="dlg-actions">
+    <span class="grow"></span>
+    <button type="button" id="askNo">Cancel</button>
+    <button type="button" class="primary" id="askYes">OK</button>
+  </div>
+</dialog>
+
 <dialog id="textDlg">
   <h2 id="textTitle">Copy</h2>
   <p class="muted small">You can edit this before copying.</p>
@@ -280,7 +293,7 @@ async function push(){
   try{
     const r = await api('/data?user='+encodeURIComponent(session.user),
       {method:'PUT', body: JSON.stringify({data:db, baseVersion:sync.version})});
-    if(r.status===409){ resolveConflict(await r.json()); }
+    if(r.status===409){ await resolveConflict(await r.json()); }
     else if(!r.ok){ throw new Error(await errorText(r)); }
     else{
       sync.version = (await r.json()).version;
@@ -298,10 +311,10 @@ async function push(){
   setSync(sync.state, sync.error);
   if(sync.dirty && sync.state!=='offline') push();
 }
-function resolveConflict(server){
-  const useServer = confirm('Your tracker was changed on another device since this page loaded.\n\n'
-    + 'OK: use the latest saved version (the changes made here will be lost).\n'
-    + 'Cancel: keep this version and replace the other device’s changes.');
+async function resolveConflict(server){
+  const useServer = await ask('Your tracker was changed on another device since this page loaded.\n\n'
+    + 'Use the latest saved version (the changes made here will be lost), or keep this version and replace the other device’s changes?',
+    {title:'Changed on another device', yes:'Use latest saved', no:'Keep this version'});
   sync.version = server.version;
   if(useServer){ db = normalize(server.data); sync.dirty = false; writeCache(); render(); toast('Loaded the latest version'); }
   // else stays dirty and push() saves again on top of the new version
@@ -333,7 +346,7 @@ async function loadUser(){
     // New user: bring along anything this browser had from before the server existed
     const legacy = readJson(LEGACY_KEY);
     const n = legacy ? (legacy.facilities||[]).length + (legacy.visits||[]).length : 0;
-    if(!cache && n && confirm(`This browser has ${(legacy.facilities||[]).length} facilities and ${(legacy.visits||[]).length} visits saved from before. Move them into your tracker?`)){
+    if(!cache && n && await ask(`This browser has ${(legacy.facilities||[]).length} facilities and ${(legacy.visits||[]).length} visits saved from before. Move them into your tracker?`, {title:'Bring your data along?', yes:'Move them in', no:'Start empty'})){
       db = normalize(legacy);
       try{ localStorage.removeItem(LEGACY_KEY); }catch(e){}
     }else if(!cache){ db = blank(); }
@@ -347,7 +360,7 @@ async function loadUser(){
   // sync.dirty (not cache.dirty): the cached copy is on screen while this loads and may have been edited meanwhile
   if(server.version < sync.version){ /* a save already went through while this was loading */ }
   else if(sync.dirty && sync.version===server.version){ push(); }                // finish saving what was left
-  else if(sync.dirty){ resolveConflict(server); push(); }
+  else if(sync.dirty){ await resolveConflict(server); push(); }
   else{ db = normalize(server.data); sync.version = server.version; writeCache(); }
   ready = true; render(); setSync(sync.dirty ? 'saving' : 'saved');
 }
@@ -365,10 +378,35 @@ async function refreshFromServer(){
   }catch(e){ if(e.code===401) forgetPasscode(); }
 }
 
+// ---------- in-app confirm / notice (instead of the browser's built-in pop-ups) ----------
+// ask() resolves true when the main button is pressed; Escape or Cancel resolves false.
+function ask(message, opts){
+  opts = opts || {};
+  const dlg = document.getElementById('askDlg'), yes = document.getElementById('askYes'), no = document.getElementById('askNo');
+  document.getElementById('askTitle').textContent = opts.title || 'Are you sure?';
+  document.getElementById('askMsg').textContent = message;
+  yes.textContent = opts.yes || 'OK';
+  yes.className = opts.danger ? 'danger-fill' : 'primary';
+  no.textContent = opts.no || 'Cancel';
+  no.hidden = !!opts.notice;
+  // The buttons answer directly: the dialog's close event doesn't reliably fire when it's
+  // stacked on another open dialog (e.g. the visit form).
+  return new Promise(resolve => {
+    askAnswer = answer => { askAnswer = null; dlg.close(); resolve(answer); };
+    dlg.showModal();
+    yes.focus();
+  });
+}
+let askAnswer = null;
+document.getElementById('askYes').addEventListener('click', () => askAnswer && askAnswer(true));
+document.getElementById('askNo').addEventListener('click', () => askAnswer && askAnswer(false));
+document.getElementById('askDlg').addEventListener('cancel', e => { e.preventDefault(); if(askAnswer) askAnswer(false); });   // Escape
+const notify = (message, title) => ask(message, {title: title || 'Heads up', notice: true});
+
 // ---------- sign-in ----------
 function forgetPasscode(){ session = {user: session.user}; writeJson(SESSION_KEY, session); showSignIn('The team passcode has changed. Enter the new one.'); }
-function signOut(){
-  if(sync.dirty && !confirm('Some changes haven’t reached the server yet and will be lost. Switch anyway?')) return;
+async function signOut(){
+  if(sync.dirty && !await ask('Some changes haven’t reached the server yet and will be lost.', {title:'Switch user?', yes:'Switch anyway', danger:true})) return;
   session = {passcode: session.passcode}; writeJson(SESSION_KEY, session);
   db = blank(); ready = false; sync.version = 0; sync.dirty = false;
   showSignIn();
@@ -434,7 +472,7 @@ document.addEventListener('submit', async e => {
       if(!name){ f.newName.focus(); return; }
       const match = users.find(u => u.name.toLowerCase()===name.toLowerCase());
       if(match) name = match.name;
-      else if(!confirm(`Start a new tracker for “${name}”?`)) return;
+      else if(!await ask(`Start a new tracker for “${name}”?`, {title:'New tracker', yes:'Start tracker'})) return;
     }
     if(!name) return;
     session.user = name; writeJson(SESSION_KEY, session);
@@ -709,16 +747,16 @@ function renderSchedule(){
 
 // ---------- drag & drop / tap-to-place ----------
 let placing = null;   // {kind:'fac', fid} | {kind:'team'|'pto'|'bank'} while waiting for a day tap
-function dropOn(date, item){
+async function dropOn(date, item){
   if(item.kind==='team'){
     openVisit(null, {facilityId:'', kind:'team', date, endDate:date, status:'planned'});
     return;
   }
-  if(item.kind==='bank' && !bankLimitOk({id:'new', facilityId:'', kind:'bank', date, endDate:''})){ alert(BANK_LIMIT_MSG); return; }
+  if(item.kind==='bank' && !bankLimitOk({id:'new', facilityId:'', kind:'bank', date, endDate:''})){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
   if(item.kind==='pto' || item.kind==='bank' || item.kind==='travel'){
     // a travel day often includes a visit (fly in, visit), so only PTO/Bank Day ask about one
     const booked = item.kind==='travel' ? [] : db.visits.filter(v => v.facilityId && v.date===date);
-    if(booked.length && !confirm(fmtDay(date)+' already has '+booked.map(visitLabel).join(', ')+'. Add '+KINDS[item.kind]+' anyway?')) return;
+    if(booked.length && !await ask(fmtDay(date)+' already has '+booked.map(visitLabel).join(', ')+'.', {title:'Add '+KINDS[item.kind]+'?', yes:'Add anyway'})) return;
     db.visits.push({id:uid(), facilityId:'', kind:item.kind, label:KINDS[item.kind], date, endDate:'', status:'planned', notes:'', concur:false});
     save(); toast(KINDS[item.kind]+' on '+fmtDay(date)+'. Click it to make it longer.');
     return;
@@ -728,13 +766,13 @@ function dropOn(date, item){
     if(!v || v.date===date) return;
     if(v.facilityId){
       const why = dayProblem(date);
-      if(why && !confirm(fmtDay(date)+' '+why+'. Move the visit there anyway?')) return;
+      if(why && !await ask(fmtDay(date)+' '+why+'.', {title:'Move this visit?', yes:'Move anyway'})) return;
       v.date = date;
     }else{
       const len = daysBetween(v.date, endOf(v));
       const moved = Object.assign({}, v, {date, endDate: v.endDate ? addDays(date, len) : ''});
-      if(kindOf(v)==='bank' && !bankSpanOk(moved)){ alert(BANK_SPAN_MSG); return; }
-      if(kindOf(v)==='bank' && !bankLimitOk(moved)){ alert(BANK_LIMIT_MSG); return; }
+      if(kindOf(v)==='bank' && !bankSpanOk(moved)){ notify(BANK_SPAN_MSG, 'Bank Day limit'); return; }
+      if(kindOf(v)==='bank' && !bankLimitOk(moved)){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
       v.date = moved.date;
       v.endDate = moved.endDate;
     }
@@ -745,7 +783,7 @@ function dropOn(date, item){
   if(!f) return;
   if(db.visits.some(v => v.facilityId===f.id && v.date===date)){ toast(f.name+' is already on '+fmtDay(date)); return; }
   const why = dayProblem(date);
-  if(why && !confirm(fmtDay(date)+' '+why+'. Book '+f.name+' anyway?')) return;
+  if(why && !await ask(fmtDay(date)+' '+why+'.', {title:'Book '+f.name+'?', yes:'Book anyway'})) return;
   const past = date < today();
   db.visits.push({id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false});
   save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date));
@@ -949,22 +987,22 @@ function openVisit(v, defaults){
 }
 visitForm.facilityId.addEventListener('change', syncVisitForm);
 visitForm.date.addEventListener('change', syncVisitForm);
-visitForm.addEventListener('submit', e => {
+visitForm.addEventListener('submit', async e => {
   e.preventDefault();
   const f = visitForm;
   if(!f.date.value) return;
-  if(!f.facilityId.value && !f.label.value.trim()){ alert('Describe what this entry is (for example, Team meeting).'); return; }
+  if(!f.facilityId.value && !f.label.value.trim()){ notify('Describe what this entry is (for example, Team meeting).', 'Missing description'); return; }
   const isFac = !!f.facilityId.value;
-  if(!isFac && f.endDate.value && f.endDate.value<f.date.value){ alert('The last day can’t be before the first day.'); return; }
+  if(!isFac && f.endDate.value && f.endDate.value<f.date.value){ notify('The last day can’t be before the first day.', 'Check the dates'); return; }
   if(isFac){
     const why = dayProblem(f.date.value);
-    if(why && !confirm(fmtDay(f.date.value)+' '+why+'. Schedule the visit anyway?')) return;
+    if(why && !await ask(fmtDay(f.date.value)+' '+why+'.', {title:'Schedule this visit?', yes:'Schedule anyway'})) return;
   }
   const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
     endDate:isFac?'':f.endDate.value, status:isFac?statusByDate(f.date.value):'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
   if(!isFac) data.kind = editingVisit ? kindOf(editingVisit) : newKind;
-  if(data.kind==='bank' && !bankSpanOk(data)){ alert(BANK_SPAN_MSG); return; }
-  if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ alert(BANK_LIMIT_MSG); return; }
+  if(data.kind==='bank' && !bankSpanOk(data)){ notify(BANK_SPAN_MSG, 'Bank Day limit'); return; }
+  if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
   if(editingVisit) Object.assign(editingVisit, data); else db.visits.push(Object.assign({id:uid()}, data));
   visitDlg.close(); save();
 });
@@ -1084,7 +1122,7 @@ async function copy(text){
 }
 
 // ---------- events ----------
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
   // Tap-to-place: after tapping a palette button, the next tap on a day places it
   if(placing){
     const day = e.target.closest('.day[data-date]');
@@ -1108,7 +1146,7 @@ document.addEventListener('click', e => {
     case 'sched-move': ui.schedStart = addDays(schedRange().start, 7*(+b.dataset.n)); saveUi(); render(); break;
     case 'sched-today': ui.schedStart = sundayOf(today()); saveUi(); render(); break;
     case 'delete-visit':
-      if(editingVisit && confirm('Delete this entry?')){ db.visits = db.visits.filter(x => x!==editingVisit); visitDlg.close(); save(); }
+      if(editingVisit && await ask(visitLabel(editingVisit)+' · '+whenText(editingVisit), {title:'Delete this entry?', yes:'Delete', danger:true})){ db.visits = db.visits.filter(x => x!==editingVisit); visitDlg.close(); save(); }
       break;
     case 'copy-addr': copy(fac(v.facilityId).address); break;
     case 'add-fac': openFac(null); break;
@@ -1128,7 +1166,7 @@ document.addEventListener('click', e => {
     case 'edit-fac': openFac(fac(id)); break;
     case 'delete-fac': {
       const n = db.visits.filter(x => x.facilityId===editingFac.id).length;
-      if(confirm(`Delete ${editingFac.name}${n?` and its ${n} visit record${n>1?'s':''}`:''}? This can’t be undone.`)){
+      if(await ask(`${n ? `Its ${n} visit record${n>1?'s':''} will be deleted too. ` : ''}This can’t be undone.`, {title:`Delete ${editingFac.name}?`, yes:'Delete', danger:true})){
         db.visits = db.visits.filter(x => x.facilityId!==editingFac.id);
         db.facilities = db.facilities.filter(x => x!==editingFac);
         facDlg.close(); save();
@@ -1146,7 +1184,7 @@ document.addEventListener('click', e => {
     case 'switch-user': signOut(); break;
     case 'import': document.getElementById('importFile').click(); break;
     case 'wipe':
-      if(confirm('Erase all your facilities and visits from the server? Export a copy first if you might need them.')){ db = blank(); save(); }
+      if(await ask('All your facilities and visits will be erased from the server. Export a copy first if you might need them.', {title:'Erase your tracker?', yes:'Erase everything', danger:true})){ db = blank(); save(); }
       break;
   }
 });
@@ -1173,10 +1211,9 @@ document.getElementById('importFile').addEventListener('change', e => {
   file.text().then(txt => {
     const d = JSON.parse(txt);
     if(!Array.isArray(d.facilities) || !Array.isArray(d.visits)) throw new Error('bad');
-    if(!confirm(`Replace your tracker with ${d.facilities.length} facilities and ${d.visits.length} visits from this backup?`)) return;
-    db = normalize(d);
-    save(); toast('Imported');
-  }).catch(() => alert('That file isn’t a Facility Visit Tracker backup.'));
+    return ask(`Your tracker will be replaced with ${d.facilities.length} facilities and ${d.visits.length} visits from this file.`, {title:'Import this file?', yes:'Replace', danger:true})
+      .then(ok => { if(ok){ db = normalize(d); save(); toast('Imported'); } });
+  }).catch(() => notify('That file isn’t a Facility Visit Tracker backup.', 'Can’t import'));
 });
 
 window.addEventListener('online', () => { if(sync.dirty) push(); });
