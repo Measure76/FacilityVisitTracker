@@ -80,6 +80,7 @@ h3{font-size:14px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;
 .item.click:hover,.item.click:focus-visible{background:rgba(127,127,127,.08)}
 .empty{padding:12px;color:var(--muted)}
 .banner{background:var(--amber-bg);color:var(--amber);border-radius:8px;padding:8px 12px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.banner.info{background:var(--blue-bg);color:var(--text)}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px}
 .hint{background:var(--panel);border:1px dashed var(--border);border-radius:8px;padding:10px 12px;margin-bottom:14px}
 .hint .row{margin-top:6px}
@@ -1298,9 +1299,14 @@ function renderTutorial(){
     </div>`;
 }
 
+// The app is designed for a computer; on a phone, say so once (per browser) and let them carry on
+const isPhone = () => window.matchMedia('(max-width:760px)').matches;
 function renderBanner(){
-  if(!ready || sync.state!=='offline') return '';
-  return `<div class="banner">Changes aren’t saved to the server yet (${esc(sync.error)}). They’re kept in this browser and will save when the connection is back.<button class="small" data-act="retry-push">Retry now</button></div>`;
+  if(!ready) return '';
+  let h = '';
+  if(sync.state==='offline') h += `<div class="banner">Changes aren’t saved to the server yet (${esc(sync.error)}). They’re kept in this browser and will save when the connection is back.<button class="small" data-act="retry-push">Retry now</button></div>`;
+  if(isPhone() && !ui.desktopNoted) h += `<div class="banner info"><span><b>Built for a computer.</b> You can check your schedule here, but planning is easiest on a desktop.</span><button class="small" data-act="desktop-noted">Got it</button></div>`;
+  return h;
 }
 
 function render(){
@@ -1678,6 +1684,7 @@ document.addEventListener('click', async e => {
     case 'export':
       download(`facility-visits-${today()}.json`, JSON.stringify(db, null, 2), 'application/json'); break;
     case 'retry-push': clearTimeout(sync.retry); push(); break;
+    case 'desktop-noted': ui.desktopNoted = true; saveUi(); document.getElementById('banner').innerHTML = renderBanner(); break;
     case 'retry-load': loadUser(); break;
     case 'sign-out': signOut(false); break;
     case 'sign-out-all': signOut(true); break;
