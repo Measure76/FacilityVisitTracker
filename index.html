@@ -979,10 +979,18 @@ function visitRow(v, opts){
   </div>`;
 }
 
+const monthOf = s => s.slice(0,8)+'01';
+const addMonths = (s, n) => { const d = parse(monthOf(s)); d.setMonth(d.getMonth()+n); return iso(d); };
+// The calendar always opens on a month: its top row is the week holding the 1st
 function schedRange(){
-  const start = sundayOf(ui.schedStart || today());   // calendar weeks run Sunday–Saturday
-  const weeks = ui.schedWeeks || 6;
+  const start = sundayOf(ui.schedMonth || monthOf(today()));   // calendar weeks run Sunday–Saturday
+  const weeks = ui.calWeeks || 8;
   return {start, weeks, end: addDays(start, weeks*7)}; // end exclusive
+}
+// Copy for email ignores where the calendar is scrolled: this week plus the next four
+function emailRange(){
+  const start = sundayOf(today()), weeks = 5;
+  return {start, weeks, end: addDays(start, weeks*7)};
 }
 function rangeVisits(r){
   return db.visits.filter(v => overlaps(v, r.start, r.end)).sort((a,b)=>a.date.localeCompare(b.date) || visitLabel(a).localeCompare(visitLabel(b)));
@@ -990,10 +998,10 @@ function rangeVisits(r){
 function renderSchedule(){
   const r = schedRange();
   let h = `<div class="toolbar">
-    <button data-act="sched-move" data-n="-1" title="Earlier week">◀</button>
-    <button data-act="sched-today">This week</button>
-    <button data-act="sched-move" data-n="1" title="Later week">▶</button>
-    <label>Starting week of<input type="date" id="schedStart" value="${r.start}"></label>
+    <button data-act="sched-move" data-n="-1" title="Previous month">◀</button>
+    <button data-act="sched-today">This month</button>
+    <button data-act="sched-move" data-n="1" title="Next month">▶</button>
+    <label>Month of<input type="date" id="schedStart" value="${ui.schedMonth || monthOf(today())}"></label>
     <label>Show<select id="schedWeeks">${[1,2,3,4,5,6,8,10,12].map(n=>`<option value="${n}" ${n===r.weeks?'selected':''}>${n} week${n>1?'s':''}</option>`).join('')}</select></label>
     <span class="grow"></span>
     <button data-act="email-text">Copy for email</button>
@@ -1272,7 +1280,7 @@ function renderTutorial(){
     <div class="panel tut">
       <h2>Step 3 · Build your schedule</h2>
       <ul>
-        <li>Tap <b>This week</b> and drag facilities onto the days you plan to visit. The list is sorted soonest due first.</li>
+        <li>Tap <b>This month</b> and drag facilities onto the days you plan to visit. The list is sorted soonest due first.</li>
         <li>Gray dashed suggestions fill the open days. Tap one that makes sense to book it.</li>
         <li>Add team meetings, PTO, Bank Days and Travel Days with the buttons above the calendar. Drag anything on the calendar to move it.</li>
       </ul>
@@ -1329,7 +1337,7 @@ window.addEventListener('resize', () => { if(ready && document.body.dataset.view
 
 // ---------- exports ----------
 function emailText(){
-  const r = schedRange(), s = S();
+  const r = emailRange(), s = S();
   const vs = rangeVisits(r);
   const lines = [];
   lines.push('Planned visits' + (s.yourName ? ' – '+s.yourName : ''));
@@ -1606,8 +1614,8 @@ document.addEventListener('click', async e => {
       setPlacing(same ? null : p);
       break;
     }
-    case 'sched-move': ui.schedStart = addDays(schedRange().start, 7*(+b.dataset.n)); saveUi(); render(); break;
-    case 'sched-today': ui.schedStart = sundayOf(today()); saveUi(); render(); break;
+    case 'sched-move': ui.schedMonth = addMonths(ui.schedMonth || today(), +b.dataset.n); saveUi(); render(); break;
+    case 'sched-today': ui.schedMonth = monthOf(today()); saveUi(); render(); break;
     case 'delete-visit':
       if(editingVisit && await ask(visitLabel(editingVisit)+' · '+whenText(editingVisit), {title:'Delete this entry?', yes:'Delete', danger:true})){ db.visits = db.visits.filter(x => x!==editingVisit); visitDlg.close(); save(); }
       break;
@@ -1676,8 +1684,8 @@ document.addEventListener('change', e => {
     else { const n = parseInt(t.value,10); if(isNaN(n) || (n<0 && k!=='officeDay')) return; db.settings[k] = n; }
     save(); return;
   }
-  if(t.id==='schedStart' && t.value){ ui.schedStart = sundayOf(t.value); }
-  else if(t.id==='schedWeeks'){ ui.schedWeeks = parseInt(t.value,10); }
+  if(t.id==='schedStart' && t.value){ ui.schedMonth = monthOf(t.value); }
+  else if(t.id==='schedWeeks'){ ui.calWeeks = parseInt(t.value,10); }
   else if(t.id==='logFrom'){ ui.logFrom = t.value; }
   else if(t.id==='logTo'){ ui.logTo = t.value; }
   else if(t.id==='logOpen'){ ui.logOpen = t.checked; }
