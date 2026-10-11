@@ -4,3 +4,6 @@ worker/SETUP.md
 
 # Wrangler local cache (account info, temp build files)
 .wrangler/
+
+# Local test secrets for wrangler dev
+.dev.vars

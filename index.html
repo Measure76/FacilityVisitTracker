@@ -158,6 +158,7 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
     <button data-tab="log">Visit log</button>
     <button data-tab="facilities">Facilities</button>
     <button data-tab="settings">Data &amp; settings</button>
+    <button data-tab="admin" hidden>Admin</button>
     <button data-tab="tutorial">Tutorial</button>
   </nav>
   <div id="banner"></div>
@@ -244,6 +245,30 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
   </form>
 </dialog>
 
+<dialog id="pinDlg">
+  <form id="pinForm" novalidate>
+    <h2>Change PIN</h2>
+    <label>Current PIN<input name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="4"></label>
+    <label>New PIN<input name="newPin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4"></label>
+    <label>New PIN again<input name="newPin2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4"></label>
+    <p class="small warn" id="pinMsg"></p>
+    <div class="dlg-actions">
+      <span class="grow"></span>
+      <button type="button" data-act="close">Cancel</button>
+      <button type="submit" class="primary">Change PIN</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="histDlg">
+  <h2 id="histTitle">History</h2>
+  <p class="small muted">Every save is kept, up to the last 50. Restoring puts the tracker back to that version and keeps the current one in this list.</p>
+  <div class="list" id="histList" style="max-height:55vh;overflow:auto"></div>
+  <div class="dlg-actions" style="margin-top:12px"><span class="grow"></span>
+    <button type="button" data-act="close">Close</button>
+  </div>
+</dialog>
+
 <dialog id="askDlg">
   <h2 id="askTitle"></h2>
   <p id="askMsg"></p>
@@ -276,8 +301,8 @@ const SERVER_URL = 'https://facility-lookup.measure-717.workers.dev';
 // The server holds the real copy. This browser keeps a cache so the app opens instantly
 // and unsaved changes survive a dropped connection or closed tab.
 const LEGACY_KEY = 'facilityVisitTracker.v1';          // data from before the server existed
-const SESSION_KEY = 'facilityVisitTracker.session';    // {passcode, user}
-const CACHE_PREFIX = 'facilityVisitTracker.cache.';    // + lowercased name → {data, version, dirty}
+const SESSION_KEY = 'facilityVisitTracker.session';    // {token, eeid, name, admin}
+const CACHE_PREFIX = 'facilityVisitTracker.cache.';    // + employee ID → {data, version, dirty}
 const UIKEY = 'facilityVisitTracker.ui';
 function blank(){ return {facilities:[], visits:[], trips:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:''}}; }
 function normalize(d){
@@ -294,7 +319,7 @@ const sync = {version:0, dirty:false, inflight:false, state:'saved', error:'', r
 let ui = readJson(UIKEY) || {};
 function saveUi(){ writeJson(UIKEY, ui); }
 
-const cacheKey = () => CACHE_PREFIX + (session.user||'').toLowerCase();
+const cacheKey = () => CACHE_PREFIX + (session.eeid||'');
 function writeCache(){ writeJson(cacheKey(), {data:db, version:sync.version, dirty:sync.dirty}); }
 function save(){
   db.visits.forEach(v => { v.status = v.facilityId ? statusByDate(v.date) : 'planned'; });
@@ -305,26 +330,29 @@ function save(){
   sync.timer = setTimeout(push, 600);
 }
 
+// Calls the team server with this browser's session key. A 401 means the key no longer works
+// (signed out everywhere, PIN reset, account deleted), so it drops back to the sign-in screen.
 async function api(path, opts){
   opts = opts || {};
-  const headers = {'X-Team-Passcode': session.passcode || ''};
+  const headers = {};
+  if(session.token) headers.Authorization = 'Bearer ' + session.token;
   if(opts.body) headers['Content-Type'] = 'application/json';
   const r = await fetch(SERVER_URL + path, Object.assign({}, opts, {headers}));
-  if(r.status===401 || r.status===429){
-    const e = new Error(r.status===401 ? 'Wrong passcode' : 'Too many wrong passcodes. Try again in an hour.');
-    e.code = r.status; throw e;
+  if(r.status===401 && session.token){
+    signedOut('You’ve been signed out. Sign in again to keep going.');
+    const e = new Error('Signed out'); e.code = 401; throw e;
   }
   return r;
 }
+const post = (path, body) => api(path, {method:'POST', body: JSON.stringify(body || {})});
 async function errorText(r){ try{ return (await r.json()).error || ('error '+r.status); }catch(e){ return 'error '+r.status; } }
 
 async function push(){
-  if(sync.inflight || !sync.dirty || !session.user) return;
+  if(sync.inflight || !sync.dirty || !session.token) return;
   sync.inflight = true; setSync('saving');
   const sent = JSON.stringify(db);
   try{
-    const r = await api('/data?user='+encodeURIComponent(session.user),
-      {method:'PUT', body: JSON.stringify({data:db, baseVersion:sync.version})});
+    const r = await api('/data', {method:'PUT', body: JSON.stringify({data:db, baseVersion:sync.version})});
     if(r.status===409){ await resolveConflict(await r.json()); }
     else if(!r.ok){ throw new Error(await errorText(r)); }
     else{
@@ -334,7 +362,7 @@ async function push(){
       setSync('saved');
     }
   }catch(e){
-    if(e.code===401){ sync.inflight = false; return forgetPasscode(); }
+    if(e.code===401){ sync.inflight = false; return; }
     setSync('offline', e.message);
     clearTimeout(sync.retry); sync.retry = setTimeout(push, 30000);
   }finally{
@@ -367,15 +395,18 @@ async function loadUser(){
   const cache = readJson(cacheKey());
   if(cache){ db = normalize(cache.data); sync.version = cache.version; sync.dirty = !!cache.dirty; ready = true; render(); }
   let r;
-  try{ r = await api('/data?user='+encodeURIComponent(session.user)); }
+  try{ r = await api('/data'); }
   catch(e){
-    if(e.code===401) return forgetPasscode();
-    if(e.code===429) return showSignIn(e.message);
+    if(e.code===401) return;
     if(cache){ setSync('offline', e.message); clearTimeout(sync.retry); sync.retry = setTimeout(push, 30000); return; }
-    return showSignIn('Can’t reach the server ('+e.message+'). Check your connection and try again.');
+    document.getElementById('view').innerHTML = `<div class="panel signin"><p class="warn">Can’t reach the server (${esc(e.message)}). Check your connection and try again.</p><button data-act="retry-load">Try again</button></div>`;
+    return;
   }
-  if(r.status===404){
-    // New user: bring along anything this browser had from before the server existed
+  if(!r.ok) return signedOut('Server problem: '+await errorText(r));
+  const server = await r.json();
+  session.name = server.name; session.admin = server.admin; writeJson(SESSION_KEY, session);
+  if(server.version===0 && !sync.version){
+    // New account: bring along anything this browser had from before the server existed
     const legacy = readJson(LEGACY_KEY);
     const n = legacy ? (legacy.facilities||[]).length + (legacy.visits||[]).length : 0;
     if(!cache && n && await ask(`This browser has ${(legacy.facilities||[]).length} facilities and ${(legacy.visits||[]).length} visits saved from before. Move them into your tracker?`, {title:'Bring your data along?', yes:'Move them in', no:'Start empty'})){
@@ -383,13 +414,10 @@ async function loadUser(){
       try{ localStorage.removeItem(LEGACY_KEY); }catch(e){}
     }else if(!cache){ db = blank(); }
     if(!db.facilities.length){ ui.tab = 'tutorial'; saveUi(); }   // the tab choice is per browser, so reset it for a new person
-    sync.version = 0; sync.dirty = true; ready = true;
+    sync.dirty = true; ready = true;
     save();
     return;
   }
-  if(!r.ok) return showSignIn('Server problem: '+await errorText(r));
-  const server = await r.json();
-  session.user = server.name; writeJson(SESSION_KEY, session);   // use the stored spelling
   // sync.dirty (not cache.dirty): the cached copy is on screen while this loads and may have been edited meanwhile
   if(server.version < sync.version){ /* a save already went through while this was loading */ }
   else if(sync.dirty && sync.version===server.version){ push(); }                // finish saving what was left
@@ -401,14 +429,14 @@ async function loadUser(){
 async function refreshFromServer(){
   if(!ready || sync.dirty || sync.inflight || document.querySelector('dialog[open]')) return;
   try{
-    const r = await api('/data?user='+encodeURIComponent(session.user));
+    const r = await api('/data');
     if(!r.ok) return;
     const server = await r.json();
     // Re-check: an edit or save may have started while this request was out
     if(server.version > sync.version && !sync.dirty && !sync.inflight && !document.querySelector('dialog[open]')){
       db = normalize(server.data); sync.version = server.version; writeCache(); render(); toast('Updated with changes from another device');
     }
-  }catch(e){ if(e.code===401) forgetPasscode(); }
+  }catch(e){}
 }
 
 // ---------- in-app confirm / notice (instead of the browser's built-in pop-ups) ----------
@@ -437,83 +465,209 @@ document.getElementById('askDlg').addEventListener('cancel', e => { e.preventDef
 const notify = (message, title) => ask(message, {title: title || 'Heads up', notice: true});
 
 // ---------- sign-in ----------
-function forgetPasscode(){ session = {user: session.user}; writeJson(SESSION_KEY, session); showSignIn('The team passcode has changed. Enter the new one.'); }
-async function signOut(){
-  if(sync.dirty && !await ask('Some changes haven’t reached the server yet and will be lost.', {title:'Switch user?', yes:'Switch anyway', danger:true})) return;
-  session = {passcode: session.passcode}; writeJson(SESSION_KEY, session);
-  db = blank(); ready = false; sync.version = 0; sync.dirty = false;
-  showSignIn();
+// Employee ID + 4-digit PIN. The server hands back a session key, which this browser keeps
+// until Sign out or until its site data is cleared.
+function signedOut(msg, mode){
+  session = {}; writeJson(SESSION_KEY, session);
+  db = blank(); ready = false; sync.version = 0; sync.dirty = false; adminData = null;
+  clearTimeout(sync.retry); clearTimeout(sync.timer);
+  showSignIn(msg, mode);
 }
-async function showSignIn(msg){
+async function signOut(all){
+  if(sync.dirty && !await ask('Some changes haven’t reached the server yet and will be lost.', {title:'Sign out?', yes:'Sign out anyway', danger:true})) return;
+  if(all && !await ask('Every browser and phone signed in as you, including this one, will need your PIN again.', {title:'Sign out everywhere?', yes:'Sign out everywhere'})) return;
+  try{
+    const r = await post('/signout', {all: !!all});
+    if(!r.ok) throw new Error(await errorText(r));
+  }catch(e){
+    if(e.code===401) return;
+    if(all) return notify('Couldn’t reach the server ('+e.message+'), so nothing was changed.', 'Not signed out');
+  }
+  try{ localStorage.removeItem(cacheKey()); }catch(e){}
+  signedOut(all ? 'Signed out on every device.' : '');
+}
+// mode: 'signin', 'signup' or 'reset' (the form name doubles as the server route)
+function showSignIn(msg, mode){
   ready = false;
+  mode = mode || 'signin';
   document.body.classList.add('signed-out');
   document.getElementById('banner').innerHTML = '';
-  const view = document.getElementById('view');
-  view.innerHTML = `<div class="panel signin"><p class="muted">Loading names…</p></div>`;
-  let users = [];
-  try{
-    const r = await api('/users');
-    if(!r.ok) throw new Error(await errorText(r));
-    users = (await r.json()).users;
-  }catch(e){
-    // 401: the server has a team passcode set (TEAM_PASSCODE) and we don't have the right one
-    if(e.code===401){
-      if(session.passcode) msg = 'That passcode isn’t right.';
-      session = {user: session.user}; writeJson(SESSION_KEY, session);
-      view.innerHTML = `<form class="panel signin" id="pcForm">
-        <h2 style="margin-top:0">Welcome</h2>
-        <label>Team passcode<input name="pc" inputmode="numeric" autocomplete="off" required autofocus></label>
-        <button class="primary" type="submit">Continue</button>
-        <p class="small warn">${esc(msg||'')}</p></form>`;
-      return;
-    }
-    view.innerHTML = `<div class="panel signin"><p class="warn">${esc(e.message)}</p><button data-act="retry-signin">Try again</button></div>`;
-    return;
-  }
-  view.innerHTML = `<form class="panel signin" id="nameForm">
-    <h2 style="margin-top:0">Who are you?</h2>
-    <label>Your name<select name="pick">
-      <option value="">Choose your name…</option>
-      ${users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}
-      <option value="__new">I’m new: enter my name</option>
-    </select></label>
-    <label id="newNameWrap" hidden>Enter your name<input name="newName" maxlength="60" placeholder="First and last name"></label>
-    <button class="primary" type="submit">Open my tracker</button>
-    <p class="small warn">${esc(msg||'')}</p></form>`;
-  const f = document.getElementById('nameForm');
-  if(!users.length){ f.pick.value = '__new'; document.getElementById('newNameWrap').hidden = false; }
-  f.pick.addEventListener('change', () => {
-    const isNew = f.pick.value==='__new';
-    document.getElementById('newNameWrap').hidden = !isNew;
-    if(isNew) f.newName.focus();
-  });
-  showSignIn.users = users;
+  const to = (m, label) => `<button type="button" class="linkish" data-act="auth-mode" data-mode="${m}">${label}</button>`;
+  const id = `<label>Employee ID<input name="eeid" inputmode="numeric" autocomplete="username" maxlength="9" placeholder="9 digits" value="${esc(showSignIn.eeid||'')}"></label>`;
+  const pin = (label, name, auto) => `<label>${label}<input name="${name}" type="password" inputmode="numeric" autocomplete="${auto}" maxlength="4" placeholder="4 digits"></label>`;
+  const forms = {
+    signin: `<h2 style="margin-top:0">Sign in</h2>${id}${pin('PIN', 'pin', 'current-password')}
+      <button class="primary" type="submit">Sign in</button>
+      <p class="small">New here? ${to('signup', 'Create an account')}</p>
+      <p class="small">Forgot your PIN? Ask an admin for a reset code, then ${to('reset', 'enter it here')}.</p>`,
+    signup: `<h2 style="margin-top:0">Create an account</h2>${id}
+      <label>Your name<input name="name" maxlength="60" autocomplete="name" placeholder="First and last name"></label>
+      ${pin('Choose a PIN', 'pin', 'new-password')}${pin('PIN again', 'pin2', 'new-password')}
+      <label>Team code<input name="teamCode" autocomplete="off" autocapitalize="off"></label>
+      <p class="small muted" style="margin-top:-6px">Hint: Company Name</p>
+      <button class="primary" type="submit">Create account</button>
+      <p class="small">Already have an account? ${to('signin', 'Sign in')}</p>`,
+    reset: `<h2 style="margin-top:0">Choose a new PIN</h2>
+      <p class="small muted">Enter the 6-digit code an admin gave you. It works once and expires after 24 hours.</p>${id}
+      <label>Reset code<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
+      ${pin('New PIN', 'pin', 'new-password')}${pin('PIN again', 'pin2', 'new-password')}
+      <button class="primary" type="submit">Set PIN and sign in</button>
+      <p class="small">${to('signin', 'Back to sign in')}</p>`,
+  };
+  document.getElementById('view').innerHTML = `<form class="panel signin" id="authForm" data-mode="${mode}" novalidate>
+    ${forms[mode]}<p class="small warn" id="authMsg">${esc(msg||'')}</p></form>`;
+  const f = document.getElementById('authForm');
+  (f.eeid.value ? f.querySelector('input:not([name=eeid])') : f.eeid).focus();
 }
 document.addEventListener('submit', async e => {
-  if(e.target.id==='pcForm'){
-    e.preventDefault();
-    session.passcode = e.target.pc.value.trim();
-    writeJson(SESSION_KEY, session);
-    if(session.user){ document.body.classList.remove('signed-out'); loadUser(); } else showSignIn();
-  }
-  if(e.target.id==='nameForm'){
-    e.preventDefault();
-    const f = e.target, users = showSignIn.users || [];
-    let name = f.pick.value;
-    if(name==='__new'){
-      name = f.newName.value.trim().replace(/\s+/g,' ');
-      if(!name){ f.newName.focus(); return; }
-      const match = users.find(u => u.name.toLowerCase()===name.toLowerCase());
-      if(match) name = match.name;
-      else if(!await ask(`Start a new tracker for “${name}”?`, {title:'New tracker', yes:'Start tracker'})) return;
+  if(e.target.id!=='authForm') return;
+  e.preventDefault();
+  const f = e.target, mode = f.dataset.mode, msg = document.getElementById('authMsg');
+  const v = n => f[n] ? f[n].value.trim() : '';
+  const eeid = v('eeid').replace(/\s+/g, '');
+  showSignIn.eeid = eeid;
+  const problem = !/^\d{9}$/.test(eeid) ? 'Employee IDs are 9 digits.'
+    : mode==='signup' && !v('name') ? 'Enter your name.'
+    : mode==='reset' && !/^\d{6}$/.test(v('code')) ? 'Reset codes are 6 digits.'
+    : !/^\d{4}$/.test(v('pin')) ? 'PINs are 4 digits.'
+    : f.pin2 && v('pin')!==v('pin2') ? 'The two PINs don’t match.'
+    : mode==='signup' && !v('teamCode') ? 'Enter the team code.' : '';
+  if(problem){ msg.textContent = problem; return; }
+  const btn = f.querySelector('button[type=submit]');
+  btn.disabled = true; msg.textContent = '';
+  try{
+    const r = await post('/'+mode, {eeid, name:v('name'), pin:v('pin'), code:v('code'), teamCode:v('teamCode')});
+    const out = await r.json().catch(() => ({}));
+    if(!r.ok){
+      if(out.needCode) return showSignIn(out.error, 'reset');
+      msg.textContent = out.error || ('Server problem (error '+r.status+')');
+      return;
     }
-    if(!name) return;
-    session.user = name; writeJson(SESSION_KEY, session);
+    session = {token: out.token, eeid}; writeJson(SESSION_KEY, session);
     document.body.classList.remove('signed-out');
     document.getElementById('view').innerHTML = '<div class="panel">Loading…</div>';
     loadUser();
+  }catch(err){
+    msg.textContent = 'Can’t reach the server ('+err.message+'). Check your connection and try again.';
+  }finally{
+    btn.disabled = false;
   }
 });
+
+// Change PIN (Data & settings)
+const pinDlg = document.getElementById('pinDlg'), pinForm = document.getElementById('pinForm');
+pinForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('pinMsg'), v = n => pinForm[n].value.trim();
+  if(!/^\d{4}$/.test(v('pin')) || !/^\d{4}$/.test(v('newPin'))){ msg.textContent = 'PINs are 4 digits.'; return; }
+  if(v('newPin')!==v('newPin2')){ msg.textContent = 'The two new PINs don’t match.'; return; }
+  try{
+    const r = await post('/pin', {pin:v('pin'), newPin:v('newPin')});
+    if(!r.ok){ msg.textContent = await errorText(r); return; }
+    pinDlg.close(); toast('PIN changed. Your other devices were signed out.');
+  }catch(err){
+    if(err.code!==401) msg.textContent = 'Can’t reach the server ('+err.message+').';
+  }
+});
+
+// ---------- admin ----------
+let adminData = null;   // {users} once loaded, or {error}
+const stamp = s => s ? new Date(s).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : 'never';
+async function loadAdmin(){
+  if(loadAdmin.busy) return;
+  loadAdmin.busy = true;
+  try{
+    const r = await api('/admin/users');
+    adminData = r.ok ? await r.json() : {error: await errorText(r)};
+  }catch(e){
+    if(e.code===401) return;
+    adminData = {error: 'Can’t reach the server ('+e.message+')'};
+  }finally{
+    loadAdmin.busy = false;
+  }
+  if(ready && ui.tab==='admin') render();
+}
+function renderAdmin(){
+  if(!adminData){ loadAdmin(); return '<div class="panel">Loading…</div>'; }
+  if(adminData.error) return `<div class="panel"><p class="warn">${esc(adminData.error)}</p><button data-act="admin-reload">Try again</button></div>`;
+  const us = adminData.users;
+  return `<p class="muted small">${us.length} account${us.length===1?'':'s'}. Resetting a PIN signs that person out everywhere and gives you a one-time code for them. Each person’s last 50 saves are kept, so a tracker can be put back the way it was.</p>
+    <div class="list">${us.map(u => {
+      const self = u.eeid===session.eeid;
+      return `<div class="item">
+      <span class="what"><b>${esc(u.name)}</b>${u.admin?' <span class="badge fly">Admin</span>':''}${self?' <span class="muted small">(you)</span>':''}
+        <div class="muted small">${esc(u.eeid)} · ${u.resetPending ? '<span class="warn">Reset code not used yet</span>' : !u.pinSet ? 'No PIN set' : 'Last active '+stamp(u.lastSeen)} · ${u.version} save${u.version===1?'':'s'}</div></span>
+      <button class="small" data-act="admin-history" data-eeid="${esc(u.eeid)}">History</button>
+      <button class="small" data-act="admin-reset" data-eeid="${esc(u.eeid)}">Reset PIN</button>
+      ${self ? '' : `<button class="small" data-act="admin-role" data-eeid="${esc(u.eeid)}">${u.admin?'Remove admin':'Make admin'}</button>
+      <button class="small danger" data-act="admin-delete" data-eeid="${esc(u.eeid)}">Delete</button>`}</div>`;
+    }).join('')}</div>
+    <div class="toolbar" style="margin-top:8px"><button data-act="admin-reload">Refresh</button></div>`;
+}
+const histDlg = document.getElementById('histDlg');
+async function openHistory(u){
+  histDlg.dataset.eeid = u.eeid;
+  document.getElementById('histTitle').textContent = 'History: ' + u.name;
+  const list = document.getElementById('histList');
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  histDlg.showModal();
+  try{
+    const r = await api('/admin/history?eeid='+encodeURIComponent(u.eeid));
+    if(!r.ok) throw new Error(await errorText(r));
+    const vs = (await r.json()).versions;
+    list.innerHTML = vs.length ? vs.map((v, i) => `<div class="item">
+      <span class="what">${stamp(v.savedAt)}<div class="muted small">Save ${v.version} · by ${esc(v.by)} · ${Math.max(1, Math.round(v.bytes/1024))} KB</div></span>
+      ${i ? `<button class="small" data-act="admin-restore" data-v="${v.version}" data-when="${esc(stamp(v.savedAt))}">Restore</button>` : '<span class="muted small">Current</span>'}</div>`).join('')
+      : '<div class="empty">No saves kept yet.</div>';
+  }catch(e){
+    if(e.code!==401) list.innerHTML = `<div class="empty warn">${esc(e.message)}</div>`;
+  }
+}
+async function adminAct(b){
+  const u = (adminData && adminData.users || []).find(x => x.eeid===(b.dataset.eeid || histDlg.dataset.eeid));
+  if(!u) return;
+  const self = u.eeid===session.eeid;
+  const call = async (path, body) => {
+    const r = await post(path, Object.assign({eeid: u.eeid}, body));
+    if(!r.ok){ await notify(await errorText(r), 'That didn’t work'); return null; }
+    return r.json();
+  };
+  try{
+    switch(b.dataset.act){
+      case 'admin-history': return openHistory(u);
+      case 'admin-reset': {
+        if(!await ask(`${u.name} will be signed out everywhere and will need a code from you to choose a new PIN.` + (self ? ' That includes you, on this device.' : ''), {title:'Reset PIN?', yes:'Reset PIN', danger:true})) return;
+        const out = await call('/admin/reset');
+        if(!out) return;
+        await notify(`Give ${u.name} this code:\n\n${out.code}\n\nIt works once and expires in 24 hours. On the sign-in screen they tap “enter it here” under “Forgot your PIN?”.`, 'Reset code');
+        if(self){ showSignIn.eeid = u.eeid; return signedOut('', 'reset'); }
+        break;
+      }
+      case 'admin-role':
+        if(!await ask(u.admin ? `${u.name} will no longer be able to reset PINs or restore trackers.` : `${u.name} will be able to reset anyone’s PIN, restore trackers, and delete accounts.`,
+          {title: u.admin ? 'Remove admin?' : 'Make admin?', yes: u.admin ? 'Remove admin' : 'Make admin'})) return;
+        if(!await call('/admin/role', {admin: !u.admin})) return;
+        break;
+      case 'admin-delete':
+        if(!await ask(`${u.name}’s account and tracker will be deleted, along with its saved history. This can’t be undone.`, {title:'Delete account?', yes:'Delete', danger:true})) return;
+        if(!await call('/admin/delete')) return;
+        break;
+      case 'admin-restore': {
+        if(!await ask(`${u.name}’s tracker will go back to how it was at ${b.dataset.when}. The current version stays in the history, so this can be undone.`, {title:'Restore this version?', yes:'Restore'})) return;
+        if(!await call('/admin/restore', {version: +b.dataset.v})) return;
+        histDlg.close();
+        toast('Restored');
+        if(self) refreshFromServer();
+        break;
+      }
+    }
+  }catch(e){
+    if(e.code!==401) notify('Can’t reach the server ('+e.message+').', 'That didn’t work');
+    return;
+  }
+  adminData = null; render();
+}
+
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 const S = () => db.settings;
 
@@ -1035,8 +1189,16 @@ function renderSettings(){
       <label>Your name (shown at the top of the email text and calendar)<input data-set="yourName" value="${esc(s.yourName)}"></label>
     </div>
     <div class="panel">
+      <h2 style="margin-top:0">Your account</h2>
+      <p class="small">Signed in as <b>${esc(session.name||'')}</b> (employee ID ${esc(session.eeid)}). This browser stays signed in until you sign out or clear its site data.</p>
+      <div class="row">
+        <button data-act="change-pin">Change PIN</button>
+        <button data-act="sign-out-all">Sign out everywhere</button>
+      </div>
+    </div>
+    <div class="panel">
       <h2 style="margin-top:0">Your data</h2>
-      <p class="small">Your tracker is saved automatically to the team server under <b>${esc(session.user)}</b>. Open this page on any device and pick your name to see it. You can also export a copy as a file at any time.</p>
+      <p class="small">Your tracker is saved automatically to the team server. Sign in on any device to see it. You can also export a copy as a file at any time.</p>
       <div class="row">
         <button class="primary" data-act="export">Export backup</button>
         <button data-act="import">Import backup…</button>
@@ -1095,8 +1257,10 @@ function renderBanner(){
 function render(){
   if(!ready) return;
   document.body.classList.remove('signed-out');
-  document.getElementById('who').innerHTML = `${esc(session.user)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="switch-user">Switch user</button>`;
-  const tab = ui.tab || (db.facilities.length ? 'status' : 'tutorial');
+  document.getElementById('who').innerHTML = `${esc(session.name||session.eeid)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="sign-out">Sign out</button>`;
+  document.querySelector('#tabs [data-tab=admin]').hidden = !session.admin;
+  let tab = ui.tab || (db.facilities.length ? 'status' : 'tutorial');
+  if(tab==='admin' && !session.admin) tab = 'status';
   document.body.dataset.view = tab;   // for CSS only; must not be data-tab, which the click handler treats as a tab button
   document.querySelectorAll('#tabs button').forEach(b => {
     b.classList.toggle('on', b.dataset.tab===tab);
@@ -1107,7 +1271,7 @@ function render(){
   });
   document.getElementById('banner').innerHTML = renderBanner();
   document.getElementById('view').innerHTML =
-    ({status:renderStatus, schedule:renderSchedule, log:renderLog, facilities:renderFacilities, settings:renderSettings, tutorial:renderTutorial}[tab])();
+    ({status:renderStatus, schedule:renderSchedule, log:renderLog, facilities:renderFacilities, settings:renderSettings, admin:renderAdmin, tutorial:renderTutorial}[tab])();
   if(tab==='schedule') sizeEventLabels();
 }
 // Stretch each event name from its first cell to the end of its bar in that week, so it
@@ -1450,8 +1614,13 @@ document.addEventListener('click', async e => {
     case 'export':
       download(`facility-visits-${today()}.json`, JSON.stringify(db, null, 2), 'application/json'); break;
     case 'retry-push': clearTimeout(sync.retry); push(); break;
-    case 'retry-signin': showSignIn(); break;
-    case 'switch-user': signOut(); break;
+    case 'retry-load': loadUser(); break;
+    case 'sign-out': signOut(false); break;
+    case 'sign-out-all': signOut(true); break;
+    case 'change-pin': pinForm.reset(); document.getElementById('pinMsg').textContent = ''; pinDlg.showModal(); break;
+    case 'auth-mode': { const f = document.getElementById('authForm'); if(f) showSignIn.eeid = f.eeid.value.trim(); showSignIn('', b.dataset.mode); break; }
+    case 'admin-reload': adminData = null; render(); break;
+    case 'admin-history': case 'admin-reset': case 'admin-role': case 'admin-delete': case 'admin-restore': adminAct(b); break;
     case 'import': document.getElementById('importFile').click(); break;
     case 'wipe':
       if(await ask('All your facilities and visits will be erased from the server. Export a copy first if you might need them.', {title:'Erase your tracker?', yes:'Erase everything', danger:true})){ db = blank(); save(); }
@@ -1490,7 +1659,7 @@ window.addEventListener('online', () => { if(sync.dirty) push(); });
 document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshFromServer(); });
 window.addEventListener('beforeunload', e => { if(sync.dirty){ e.preventDefault(); e.returnValue = ''; } });
 
-if(session.user) loadUser(); else showSignIn();
+if(session.token) loadUser(); else showSignIn();
 </script>
 </body>
 </html>
