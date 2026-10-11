@@ -50,7 +50,8 @@ label.check{display:flex;gap:8px;align-items:center;color:var(--text);font-size:
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .chip{padding:8px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--border);min-width:120px}
 .chip b{display:block;font-size:22px;line-height:1.1}
-.chip.red b{color:var(--red)} .chip.amber b{color:var(--amber)} .chip.blue b{color:var(--blue)}
+.chip b small{font-size:14px;font-weight:600}
+.chip.green b{color:var(--green)} .chip.red b{color:var(--red)} .chip.amber b{color:var(--amber)} .chip.blue b{color:var(--blue)}
 .card{background:var(--panel);border:1px solid var(--border);border-left:5px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px}
 .card.overdue,.card.never{border-left-color:var(--red)} .card.soon{border-left-color:var(--amber)} .card.ok{border-left-color:var(--green)} .card.ancillary{border-left-color:var(--border)}
 .badge.ancillary{background:var(--gray-bg);color:var(--muted);cursor:help}
@@ -936,7 +937,10 @@ function renderStatus(){
   if(!db.facilities.length) return `<div class="panel">No facilities yet. <button class="primary" data-act="add-batch">+ Add Facilities</button></div>`;
   const rows = allStatus();
   const n = k => rows.filter(r => r.level===k).length;
+  // On time = every facility with regular visits that isn't overdue yet (due-soon ones included)
+  const regular = rows.filter(r => !r.f.ancillary).length, late = n('overdue')+n('never');
   let h = `<div class="chips">
+    <div class="chip green"><b>${regular-late}<small> of ${regular}</small></b>On time</div>
     <div class="chip red"><b>${n('overdue')+n('never')}</b>Overdue</div>
     <div class="chip amber"><b>${n('soon')}</b>Due within ${S().soonDays} days</div>
     <div class="chip blue"><b>${rows.filter(r=>r.needsPlan).length}</b>Due but not scheduled in time</div>
