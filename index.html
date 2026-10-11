@@ -618,8 +618,14 @@ function suggestSchedule(from, to){   // to is exclusive; returns {date: {f, due
       const ds = tripDates(t, d);
       if(ds.every(x => openVisitDay(x) && !out[x])) cands.push({t, ds, due: tripDue(t), name: t.name});
     });
-    const pick = cands.sort((a,b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name))[0];
-    if(!pick) continue;
+    let pick = cands.sort((a,b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name))[0];
+    if(!pick){
+      // Nothing is close to due: fill the open day with the drive facility furthest along its
+      // rotation (trip members and fly facilities only go on their trips)
+      const filler = singles.filter(p => !p.remote).sort((a,b) => dueOf[a.f.id].due.localeCompare(dueOf[b.f.id].due) || a.f.name.localeCompare(b.f.name))[0];
+      if(!filler) continue;
+      pick = {p: filler, due: dueOf[filler.f.id].due, name: filler.f.name};
+    }
     if(pick.t){
       pick.ds.forEach((x, i) => {
         const day = pick.t.days[i];
@@ -858,7 +864,7 @@ function renderSchedule(){
         ? `<button class="ev sug" data-act="accept-sug" data-tid="${sg.trip.id}" data-start="${sg.start}"
             title="Suggested trip: ${esc(sg.trip.name)}${sg.f ? ' · '+esc(sg.f.name)+' is due '+fmt(sg.due) : ''}. Click to book the whole trip.">${sg.travel ? 'Travel Day' : esc(sg.f.name)+(sg.f.type==='remote'?' ✈':'')}</button>`
         : `<button class="ev sug" data-act="accept-sug" data-fid="${sg.f.id}" data-date="${d}"
-            title="Suggested: ${esc(sg.f.name)} is due ${fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>`;
+            title="Suggested: ${esc(sg.f.name)} ${addDays(sg.due, -SUGGEST_LEAD_DAYS) > d ? 'isn’t due until '+fmt(sg.due)+', but this day is open' : 'is due '+fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>`;
       h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${suggestion}</div>`;
     }
   }
