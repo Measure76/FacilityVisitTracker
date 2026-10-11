@@ -134,6 +134,10 @@ body.placing .day{cursor:copy}
 button.danger-fill{background:var(--red);border-color:var(--red);color:var(--panel)}
 .ev.sug{background:none;border:1px dashed var(--border);border-left:1px dashed var(--border);color:var(--muted);font-style:italic}
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
+.pchip.trip{border-left-color:var(--accent);background:var(--gray-bg)}
+.trip-day{margin-bottom:6px;flex-wrap:nowrap}
+.trip-day .dname{width:34px;color:var(--muted);font-size:13px}
+.trip-day select{flex:1;min-width:0}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 @media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
@@ -201,6 +205,25 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
   </form>
 </dialog>
 
+<dialog id="tripDlg">
+  <form id="tripForm">
+    <h2 id="tripTitle">Trip</h2>
+    <label>Name<input name="name" required placeholder="Southern loop"></label>
+    <label>Usually starts on<select name="start">
+      <option value="1">Monday</option><option value="2" selected>Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option>
+    </select></label>
+    <div class="small muted" style="margin-bottom:4px">Days, in order (weekends are skipped)</div>
+    <div id="tripDays"></div>
+    <button type="button" class="small" data-act="trip-add-day">+ Add a day</button>
+    <div class="dlg-actions" style="margin-top:14px">
+      <button type="button" class="danger" data-act="delete-trip" id="tripDel">Delete</button>
+      <span class="grow"></span>
+      <button type="button" data-act="close">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="batchDlg">
   <form id="batchForm">
     <h2>Add several facilities</h2>
@@ -250,10 +273,10 @@ const LEGACY_KEY = 'facilityVisitTracker.v1';          // data from before the s
 const SESSION_KEY = 'facilityVisitTracker.session';    // {passcode, user}
 const CACHE_PREFIX = 'facilityVisitTracker.cache.';    // + lowercased name → {data, version, dirty}
 const UIKEY = 'facilityVisitTracker.ui';
-function blank(){ return {facilities:[], visits:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:''}}; }
+function blank(){ return {facilities:[], visits:[], trips:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:''}}; }
 function normalize(d){
   d = d || {};
-  return {facilities:d.facilities||[], visits:d.visits||[], settings:Object.assign(blank().settings, d.settings||{})};
+  return {facilities:d.facilities||[], visits:d.visits||[], trips:d.trips||[], settings:Object.assign(blank().settings, d.settings||{})};
 }
 function readJson(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
 function writeJson(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
@@ -556,25 +579,62 @@ const TRIP_BUNDLE_DAYS = 21;       // fly facilities due within this of the trip
 function openVisitDay(d){
   return !isWeekend(d) && !isOffice(d) && !holidayOn(d) && !blockOn(d) && !db.visits.some(v => v.facilityId && v.date===d);
 }
-function suggestSchedule(from, to){   // to is exclusive; returns {date: {f, due}}
-  const pool = db.facilities.filter(f => !f.ancillary).map(f => {
+// ---------- trips ----------
+// A trip is a fixed run of weekdays that always go together, e.g. Tue Park Manor → Wed Travel Day.
+// {id, name, startDay (1=Mon..5=Fri), days:[{fid} | {travel:true}]}
+const tripById = id => (db.trips||[]).find(t => t.id===id);
+const validTrip = t => t.days.length && t.days.some(x => x.fid) && t.days.every(x => x.travel || fac(x.fid));
+// The trip's days starting on `start`, skipping weekends
+function tripDates(t, start){
+  const out = [];
+  for(let d = start; out.length < t.days.length; d = addDays(d, 1)) if(!isWeekend(d)) out.push(d);
+  return out;
+}
+const tripSummary = t => DAYS[t.startDay].slice(0,3) + ': ' + t.days.map(x => x.travel ? 'Travel Day' : (fac(x.fid)||{name:'?'}).name).join(' → ');
+
+function suggestSchedule(from, to){   // to is exclusive; returns {date: {f, due, trip?, start?} | {travel, trip, start}}
+  const trips = (db.trips||[]).filter(validTrip);
+  const inTrip = new Set();
+  trips.forEach(t => t.days.forEach(x => x.fid && inTrip.add(x.fid)));
+  // next due date per facility; a booking counts as a visit
+  const dueOf = {};
+  db.facilities.forEach(f => {
     const dates = db.visits.filter(v => v.facilityId===f.id).map(v => v.date).sort();
     const weeks = typeInfo(f.type).weeks;
-    return {f, weeks, remote: f.type==='remote', due: dates.length ? addDays(dates[dates.length-1], weeks*7) : today()};
+    dueOf[f.id] = {weeks, due: dates.length ? addDays(dates[dates.length-1], weeks*7) : today()};
   });
+  const singles = db.facilities.filter(f => !f.ancillary && !inTrip.has(f.id)).map(f => ({f, remote: f.type==='remote'}));
+  const tripDue = t => t.days.filter(x => x.fid).map(x => dueOf[x.fid].due).sort()[0];
   const out = {};
-  const place = (p, d) => { out[d] = {f:p.f, due:p.due}; p.due = addDays(d, p.weeks*7); };
+  const placeOne = (f, d) => { out[d] = {f, due: dueOf[f.id].due}; dueOf[f.id].due = addDays(d, dueOf[f.id].weeks*7); };
   const nextOpen = d => { for(d = addDays(d,1); d < to; d = addDays(d,1)) if(openVisitDay(d) && !out[d]) return d; return null; };
-  const byDue = (a,b) => a.due.localeCompare(b.due) || a.f.name.localeCompare(b.f.name);
+  const eligible = due => addDays(due, -SUGGEST_LEAD_DAYS);
   for(let d = from; d < to; d = addDays(d,1)){
     if(!openVisitDay(d) || out[d]) continue;
-    const pick = pool.filter(p => addDays(p.due, -SUGGEST_LEAD_DAYS) <= d).sort(byDue)[0];
+    // candidates for this day: single facilities, and trips that start on this weekday and fit
+    const cands = singles.filter(p => eligible(dueOf[p.f.id].due) <= d).map(p => ({p, due: dueOf[p.f.id].due, name: p.f.name}));
+    trips.forEach(t => {
+      if(parse(d).getDay()!==t.startDay || eligible(tripDue(t)) > d) return;
+      const ds = tripDates(t, d);
+      if(ds.every(x => openVisitDay(x) && !out[x])) cands.push({t, ds, due: tripDue(t), name: t.name});
+    });
+    const pick = cands.sort((a,b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name))[0];
     if(!pick) continue;
-    place(pick, d);
-    if(pick.remote){
+    if(pick.t){
+      pick.ds.forEach((x, i) => {
+        const day = pick.t.days[i];
+        out[x] = day.travel ? {travel:true, trip:pick.t, start:d} : {f:fac(day.fid), due:dueOf[day.fid].due, trip:pick.t, start:d};
+      });
+      // each member is next due one interval after its last day on this trip
+      pick.ds.forEach((x, i) => { const day = pick.t.days[i]; if(day.fid) dueOf[day.fid].due = addDays(x, dueOf[day.fid].weeks*7); });
+      continue;
+    }
+    placeOne(pick.p.f, d);
+    if(pick.p.remote){   // fly facilities not on a trip: bundle others due soon onto the next open days
       let day = d;
-      pool.filter(p => p.remote && p!==pick && addDays(p.due, -TRIP_BUNDLE_DAYS) <= d).sort(byDue)
-        .forEach(p => { day = nextOpen(day); if(day) place(p, day); });
+      singles.filter(q => q.remote && q!==pick.p && addDays(dueOf[q.f.id].due, -TRIP_BUNDLE_DAYS) <= d)
+        .sort((a,b) => dueOf[a.f.id].due.localeCompare(dueOf[b.f.id].due))
+        .forEach(q => { day = nextOpen(day); if(day) placeOne(q.f, day); });
     }
   }
   return out;
@@ -742,7 +802,8 @@ function renderSchedule(){
   // Sidebar: soonest next due first, where a booking counts as a visit (never visited at the
   // top), so a facility drops down the list once it's booked; colored by due status, dimmed when booked
   const sug = visibleSuggestions(), sugFor = {};
-  Object.keys(sug).sort().forEach(d => { if(!sugFor[sug[d].f.id]) sugFor[sug[d].f.id] = d; });
+  const tripSug = {};
+  Object.keys(sug).sort().forEach(d => { const x = sug[d]; if(x.f && !sugFor[x.f.id]) sugFor[x.f.id] = d; if(x.trip && !tripSug[x.trip.id]) tripSug[x.trip.id] = x.start; });
   const nextDue = st => { const ds = db.visits.filter(v => v.facilityId===st.f.id).map(v => v.date).sort();
     return ds.length ? addDays(ds[ds.length-1], st.info.weeks*7) : ''; };
   const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || nextDue(a).localeCompare(nextDue(b)) || a.f.name.localeCompare(b.f.name));
@@ -758,6 +819,8 @@ function renderSchedule(){
     `<button class="pchip ${k==='team'?'team':'team '+k}${placing && placing.kind===k?' armed':''}" draggable="true" data-drag="${k}" data-act="arm">+ ${KINDS[k]}</button>`).join('');
   h += `<div class="palette quick">${quick}</div>
     <div class="sched"><aside class="side">
+    ${(db.trips||[]).filter(validTrip).length ? `<h3>Trips</h3><div class="palette">${(db.trips||[]).filter(validTrip).map(t =>
+      `<button class="pchip trip${placing && placing.tid===t.id?' armed':''}" draggable="true" data-drag="trip" data-tid="${t.id}" data-act="arm" title="${esc(tripSummary(t))}">${esc(t.name)}<span class="sub">${DAYS[t.startDay].slice(0,3)} · ${t.days.length} day${t.days.length>1?'s':''}${tripSug[t.id] ? ' · suggested '+fmt(tripSug[t.id]) : ''}</span></button>`).join('')}</div>` : ''}
     <h3>Drag onto a day</h3>
     <div class="palette">${chips}</div>
     <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
@@ -791,8 +854,11 @@ function renderSchedule(){
           title="${esc(visitLabel(v))}${done?' · completed':' · planned'}">${done?'✓ ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
       }).join('');
       const sg = sug[d];
-      const suggestion = sg ? `<button class="ev sug" data-act="accept-sug" data-fid="${sg.f.id}" data-date="${d}"
-          title="Suggested: ${esc(sg.f.name)} is due ${fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>` : '';
+      const suggestion = !sg ? '' : sg.trip
+        ? `<button class="ev sug" data-act="accept-sug" data-tid="${sg.trip.id}" data-start="${sg.start}"
+            title="Suggested trip: ${esc(sg.trip.name)}${sg.f ? ' · '+esc(sg.f.name)+' is due '+fmt(sg.due) : ''}. Click to book the whole trip.">${sg.travel ? 'Travel Day' : esc(sg.f.name)+(sg.f.type==='remote'?' ✈':'')}</button>`
+        : `<button class="ev sug" data-act="accept-sug" data-fid="${sg.f.id}" data-date="${d}"
+            title="Suggested: ${esc(sg.f.name)} is due ${fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>`;
       h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${suggestion}</div>`;
     }
   }
@@ -801,7 +867,19 @@ function renderSchedule(){
 
 // ---------- drag & drop / tap-to-place ----------
 let placing = null;   // {kind:'fac', fid} | {kind:'team'|'pto'|'bank'} while waiting for a day tap
+async function bookTrip(t, start){
+  const ds = tripDates(t, start);
+  const problems = ds.map((d, i) => { const why = dayProblem(d); return why ? fmtDay(d)+' '+why : ''; }).filter(Boolean);
+  if(problems.length && !await ask(problems.join('\n'), {title:'Book '+t.name+'?', yes:'Book anyway'})) return;
+  ds.forEach((d, i) => {
+    const day = t.days[i];
+    if(day.travel){ if(!db.visits.some(v => kindOf(v)==='travel' && v.date===d)) db.visits.push({id:uid(), facilityId:'', kind:'travel', label:KINDS.travel, date:d, endDate:'', status:'planned', notes:'', concur:false}); }
+    else if(!db.visits.some(v => v.facilityId===day.fid && v.date===d)) db.visits.push({id:uid(), facilityId:day.fid, date:d, status:statusByDate(d), notes:'', label:'', endDate:'', concur:false});
+  });
+  save(); toast('Booked '+t.name+': '+fmt(ds[0])+' – '+fmt(ds[ds.length-1]));
+}
 async function dropOn(date, item){
+  if(item.kind==='trip'){ const t = tripById(item.tid); if(t) bookTrip(t, date); return; }
   if(item.kind==='team'){
     openVisit(null, {facilityId:'', kind:'team', date, endDate:date, status:'planned'});
     return;
@@ -851,7 +929,7 @@ document.addEventListener('dragstart', e => {
   const el = e.target.closest && e.target.closest('[data-drag]');
   if(!el) return;
   const k = el.dataset.drag;
-  const item = k==='fac' ? {kind:'fac', fid:el.dataset.fid} : KINDS[k] ? {kind:k} : {kind:'visit', id:el.dataset.id};
+  const item = k==='fac' ? {kind:'fac', fid:el.dataset.fid} : k==='trip' ? {kind:'trip', tid:el.dataset.tid} : KINDS[k] ? {kind:k} : {kind:'visit', id:el.dataset.id};
   e.dataTransfer.setData('text/plain', JSON.stringify(item));
   e.dataTransfer.effectAllowed = item.kind==='visit' ? 'move' : 'copy';
 });
@@ -912,7 +990,14 @@ function renderFacilities(){
         <div class="muted small">${esc(f.address||'No address')} · ${esc(typeInfo(f.type).long)}</div>
         ${f.notes?`<div class="muted small">${esc(f.notes)}</div>`:''}</span>
       <button class="small" data-act="edit-fac" data-id="${f.id}">Edit</button></div>`).join('')
-      : '<div class="empty">No facilities yet.</div>'}</div>`;
+      : '<div class="empty">No facilities yet.</div>'}</div>
+    <h2>Trips</h2>
+    <p class="small muted">Facilities you always visit together on set days, with any travel days. Suggestions keep a trip together and start it on its usual weekday; drag a trip onto the calendar to book every day at once.</p>
+    <div class="list">${(db.trips||[]).length ? db.trips.map(t => `<div class="item">
+      <span class="what"><b>${esc(t.name)}</b><div class="muted small">${esc(tripSummary(t))}</div></span>
+      <button class="small" data-act="edit-trip" data-id="${t.id}">Edit</button></div>`).join('')
+      : '<div class="empty">No trips yet.</div>'}</div>
+    <div class="toolbar" style="margin-top:8px"><button data-act="add-trip">+ Add trip</button></div>`;
 }
 
 function renderSettings(){
@@ -1148,6 +1233,48 @@ async function lookupAddress(){
     lookupBusy = false;
   }
 }
+// ---------- trip editor ----------
+const tripDlg = document.getElementById('tripDlg'), tripForm = document.getElementById('tripForm');
+let editingTrip = null, tripDraft = [];
+function renderTripDays(){
+  const startDay = +tripForm.start.value;
+  const opts = sel => db.facilities.slice().sort(byName).map(f => `<option value="${f.id}" ${sel===f.id?'selected':''}>${esc(f.name)}</option>`).join('')
+    + `<option value="travel" ${sel==='travel'?'selected':''}>Travel Day</option>`;
+  document.getElementById('tripDays').innerHTML = tripDraft.map((x, i) => `<div class="row trip-day">
+      <span class="dname">${DAYS[(startDay + i - 1) % 5 + 1].slice(0,3)}</span>
+      <select data-i="${i}">${opts(x.travel ? 'travel' : x.fid)}</select>
+      <button type="button" class="small" data-act="trip-del-day" data-i="${i}" title="Remove this day">✕</button></div>`).join('');
+}
+function openTrip(t){
+  editingTrip = t || null;
+  tripForm.name.value = t ? t.name : '';
+  tripForm.start.value = String(t ? t.startDay : 2);
+  tripDraft = t ? t.days.map(x => Object.assign({}, x)) : [{fid: (db.facilities.slice().sort(byName)[0]||{}).id}];
+  document.getElementById('tripTitle').textContent = t ? 'Edit trip' : 'Add trip';
+  document.getElementById('tripDel').hidden = !t;
+  renderTripDays();
+  tripDlg.showModal();
+}
+tripForm.start.addEventListener('change', renderTripDays);
+document.getElementById('tripDays').addEventListener('change', e => {
+  const i = e.target.dataset.i;
+  if(i!==undefined) tripDraft[+i] = e.target.value==='travel' ? {travel:true} : {fid:e.target.value};
+});
+tripForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const name = tripForm.name.value.trim();
+  if(!name) return;
+  if(!tripDraft.some(x => x.fid)){ notify('Add at least one facility to the trip.', 'Empty trip'); return; }
+  // a facility belongs to one trip, so suggestions know which trip to keep it with
+  const clash = tripDraft.filter(x => x.fid).map(x => x.fid)
+    .map(fid => ({fid, t: (db.trips||[]).find(o => o!==editingTrip && o.days.some(y => y.fid===fid))})).find(c => c.t);
+  if(clash){ notify(fac(clash.fid).name+' is already in the trip “'+clash.t.name+'”. A facility can only be in one trip.', 'Already in a trip'); return; }
+  const data = {name, startDay: +tripForm.start.value, days: tripDraft.map(x => x.travel ? {travel:true} : {fid:x.fid})};
+  if(!db.trips) db.trips = [];
+  if(editingTrip) Object.assign(editingTrip, data); else db.trips.push(Object.assign({id:uid()}, data));
+  tripDlg.close(); save();
+});
+
 const batchDlg = document.getElementById('batchDlg'), batchForm = document.getElementById('batchForm');
 function openBatch(){
   const s = S();
@@ -1204,10 +1331,11 @@ document.addEventListener('click', async e => {
     case 'close': b.closest('dialog').close(); break;
     case 'new-visit': openVisit(null, {date: b.dataset.status==='completed' ? today() : addDays(today(), 1), facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
-    case 'accept-sug': dropOn(b.dataset.date, {kind:'fac', fid:b.dataset.fid}); break;
+    case 'accept-sug': b.dataset.tid ? dropOn(b.dataset.start, {kind:'trip', tid:b.dataset.tid}) : dropOn(b.dataset.date, {kind:'fac', fid:b.dataset.fid}); break;
     case 'arm': {
-      const p = KINDS[b.dataset.drag] ? {kind:b.dataset.drag} : {kind:'fac', fid:b.dataset.fid};
-      const same = placing && placing.kind===p.kind && placing.fid===p.fid;
+      const k = b.dataset.drag;
+      const p = k==='trip' ? {kind:'trip', tid:b.dataset.tid} : KINDS[k] ? {kind:k} : {kind:'fac', fid:b.dataset.fid};
+      const same = placing && placing.kind===p.kind && placing.fid===p.fid && placing.tid===p.tid;
       setPlacing(same ? null : p);
       break;
     }
@@ -1219,6 +1347,15 @@ document.addEventListener('click', async e => {
     case 'copy-addr': copy(fac(v.facilityId).address); break;
     case 'add-fac': openFac(null); break;
     case 'add-batch': openBatch(); break;
+    case 'add-trip': openTrip(null); break;
+    case 'edit-trip': openTrip(tripById(id)); break;
+    case 'trip-add-day': tripDraft.push({travel:true}); renderTripDays(); break;
+    case 'trip-del-day': tripDraft.splice(+b.dataset.i, 1); renderTripDays(); break;
+    case 'delete-trip':
+      if(editingTrip && await ask('The facilities stay; only the trip grouping is removed.', {title:'Delete '+editingTrip.name+'?', yes:'Delete', danger:true})){
+        db.trips = db.trips.filter(t => t!==editingTrip); tripDlg.close(); save();
+      }
+      break;
     case 'lookup': lookupAddress(); break;
     case 'pick-addr': {
       const x = lookupResults[+b.dataset.i];
@@ -1237,6 +1374,8 @@ document.addEventListener('click', async e => {
       if(await ask(`${n ? `Its ${n} visit record${n>1?'s':''} will be deleted too. ` : ''}This can’t be undone.`, {title:`Delete ${editingFac.name}?`, yes:'Delete', danger:true})){
         db.visits = db.visits.filter(x => x.facilityId!==editingFac.id);
         db.facilities = db.facilities.filter(x => x!==editingFac);
+        (db.trips||[]).forEach(t => { t.days = t.days.filter(x => x.fid!==editingFac.id); });
+        db.trips = (db.trips||[]).filter(t => t.days.some(x => x.fid));
         facDlg.close(); save();
       }
       break;
