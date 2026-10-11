@@ -9,14 +9,14 @@
   --bg:#f5f6f8; --panel:#ffffff; --text:#1c2230; --muted:#5e6777; --border:#d8dce3;
   --accent:#2457c5; --accent-text:#ffffff;
   --red:#b42318; --red-bg:#fdeceb; --amber:#8a5a00; --amber-bg:#fff4d8;
-  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3; --pto:#7a4fc0; --bank:#0f7f7a;
+  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3; --pto:#7a4fc0; --bank:#0f7f7a; --travel:#b05a1e;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#13161b; --panel:#1c2027; --text:#e6e9ee; --muted:#9aa3b2; --border:#323843;
     --accent:#6f9cff; --accent-text:#0b1020;
     --red:#ff8f85; --red-bg:#3b1f1d; --amber:#f2c065; --amber-bg:#3a3018;
-    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33; --pto:#b796f0; --bank:#5cc8c0;
+    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33; --pto:#b796f0; --bank:#5cc8c0; --travel:#f0a060;
   }
 }
 *{box-sizing:border-box}
@@ -122,8 +122,8 @@ body.placing .day{cursor:copy}
 .ev{display:block;width:100%;margin-top:3px;padding:2px 5px;border:none;border-left:3px solid var(--accent);border-radius:4px;background:var(--blue-bg);color:var(--text);font:inherit;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .ev.done{border-left-color:var(--green);background:var(--green-bg);color:var(--green)}
 .ev.team{border-left:none;background:var(--accent);color:var(--accent-text);border-radius:0;margin-left:-4px;margin-right:-4px;width:calc(100% + 8px);padding-left:9px}
-.ev.team.pto{background:var(--pto)} .ev.team.bank{background:var(--bank)}
-.pchip.pto{border-left-color:var(--pto)} .pchip.bank{border-left-color:var(--bank)}
+.ev.team.pto{background:var(--pto)} .ev.team.bank{background:var(--bank)} .ev.team.travel{background:var(--travel)}
+.pchip.pto{border-left-color:var(--pto)} .pchip.bank{border-left-color:var(--bank)} .pchip.travel{border-left-color:var(--travel)}
 .quick{margin:16px 0 0}
 .ev.team.first{border-radius:4px 0 0 4px;margin-left:0;width:calc(100% + 4px);padding-left:5px}
 .ev.team.last{border-radius:0 4px 4px 0;margin-right:0;width:calc(100% + 4px)}
@@ -502,20 +502,23 @@ function dayProblem(d){
   const b = blockOn(d);
   return b ? 'is during '+visitLabel(b) : '';
 }
-// Weekdays minus the office day, holidays and days taken by team meetings/projects
+// Weekdays minus the office day, holidays and days taken by team events/PTO/travel.
+// A weekday with a facility visit always counts as a used visit day (e.g. fly in and visit).
 function weekCapacity(ws){
-  let avail = 0; const used = new Set();
+  let avail = 0, used = 0;
   for(let i=0;i<7;i++){
     const d = addDays(ws,i), wd = parse(d).getDay();
-    if(wd===0 || wd===6 || isOffice(d) || holidayOn(d) || blockOn(d)) continue;
+    if(wd===0 || wd===6) continue;
+    const visited = db.visits.some(v => v.facilityId && v.date===d);
+    if(!visited && (isOffice(d) || holidayOn(d) || blockOn(d))) continue;
     avail++;
-    if(db.visits.some(v => v.facilityId && v.date===d)) used.add(d);
+    if(visited) used++;
   }
-  return {avail, used: used.size};
+  return {avail, used};
 }
 // Non-facility entries: team meetings/projects, PTO and Bank Days (older entries have no kind = team)
 const ANC_TIP = 'This facility does not need regular visits';
-const KINDS = {team:'Team meeting / project', pto:'PTO', bank:'Bank Day'};
+const KINDS = {team:'Team meeting / project', pto:'PTO', bank:'Bank Day', travel:'Travel Day'};
 const kindOf = v => v.facilityId ? '' : (v.kind || 'team');
 // What managers and facilities see: a Bank Day is just PTO to them
 const outLabel = v => kindOf(v)==='bank' ? 'PTO' : visitLabel(v);
@@ -665,7 +668,7 @@ function renderSchedule(){
     return `<button class="pchip ${st.level}${booked?' booked':''}${armed?' armed':''}" draggable="true" data-drag="fac" data-fid="${st.f.id}" data-act="arm"
       title="${esc(statusText(st))}${st.next?' · next planned '+fmt(st.next):''}">${esc(st.f.name)}${st.f.type==='remote'?' ✈':''}<span class="sub">${sub}</span></button>`;
   }).join('');
-  const quick = ['team','pto','bank'].map(k =>
+  const quick = ['team','pto','bank','travel'].map(k =>
     `<button class="pchip ${k==='team'?'team':'team '+k}${placing && placing.kind===k?' armed':''}" draggable="true" data-drag="${k}" data-act="arm">+ ${KINDS[k]}</button>`).join('');
   h += `<div class="palette quick">${quick}</div>
     <div class="sched"><aside class="side">
@@ -712,8 +715,9 @@ function dropOn(date, item){
     return;
   }
   if(item.kind==='bank' && !bankLimitOk({id:'new', facilityId:'', kind:'bank', date, endDate:''})){ alert(BANK_LIMIT_MSG); return; }
-  if(item.kind==='pto' || item.kind==='bank'){
-    const booked = db.visits.filter(v => v.facilityId && v.date===date);
+  if(item.kind==='pto' || item.kind==='bank' || item.kind==='travel'){
+    // a travel day often includes a visit (fly in, visit), so only PTO/Bank Day ask about one
+    const booked = item.kind==='travel' ? [] : db.visits.filter(v => v.facilityId && v.date===date);
     if(booked.length && !confirm(fmtDay(date)+' already has '+booked.map(visitLabel).join(', ')+'. Add '+KINDS[item.kind]+' anyway?')) return;
     db.visits.push({id:uid(), facilityId:'', kind:item.kind, label:KINDS[item.kind], date, endDate:'', status:'planned', notes:'', concur:false});
     save(); toast(KINDS[item.kind]+' on '+fmtDay(date)+'. Click it to make it longer.');
