@@ -122,11 +122,12 @@ body.placing .day{cursor:copy}
 .day.holiday .dtag{color:var(--amber);font-weight:600}
 .ev{display:block;width:100%;margin-top:3px;padding:2px 5px;border:none;border-left:3px solid var(--accent);border-radius:4px;background:var(--blue-bg);color:var(--text);font:inherit;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .ev.done{border-left-color:var(--green);background:var(--green-bg);color:var(--green)}
-.ev.team{border-left:none;background:var(--accent);color:var(--accent-text);border-radius:0;margin-left:-4px;margin-right:-4px;width:calc(100% + 8px);padding-left:9px}
+.ev.team .lbl{position:relative;z-index:1;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.ev.team{overflow:visible;border-left:none;background:var(--accent);color:var(--accent-text);border-radius:0;margin-left:-4px;margin-right:-5px;width:calc(100% + 9px);padding-left:9px}
 .ev.team.pto{background:var(--pto)} .ev.team.bank{background:var(--bank)} .ev.team.travel{background:var(--travel)}
 .pchip.pto{border-left-color:var(--pto)} .pchip.bank{border-left-color:var(--bank)} .pchip.travel{border-left-color:var(--travel)}
 .quick{margin:16px 0 0}
-.ev.team.first{border-radius:4px 0 0 4px;margin-left:0;width:calc(100% + 4px);padding-left:5px}
+.ev.team.first{border-radius:4px 0 0 4px;margin-left:0;width:calc(100% + 5px);padding-left:5px}
 .ev.team.last{border-radius:0 4px 4px 0;margin-right:0;width:calc(100% + 4px)}
 .ev.team.first.last{border-radius:4px;width:100%}
 #askMsg{white-space:pre-line;margin:4px 0 16px}
@@ -731,7 +732,10 @@ function renderSchedule(){
       const num = (i===0 && w===0) || d.endsWith('-01') ? fmt(d) : String(parse(d).getDate());
       const tag = hol || (office ? 'Office day' : '');
       const events = vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
-        const first = v.date===d, lastDay = endOf(v)===d, label = first || (i===1 && v.date<ws) ? esc(visitLabel(v)) : '&nbsp;';
+        const first = v.date===d, lastDay = endOf(v)===d, labelHere = first || (i===0 && v.date<ws);
+        // The name sits in the bar's first cell this week and runs across to the bar's last cell (see sizeEventLabels)
+        const rowEnd = addDays(ws, 6), barEnd = endOf(v) < rowEnd ? endOf(v) : rowEnd;
+        const label = labelHere ? `<span class="lbl" data-to="${barEnd}">${esc(visitLabel(v))}</span>` : '&nbsp;';
         return `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
       }).join('');
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
@@ -906,7 +910,20 @@ function render(){
   document.getElementById('banner').innerHTML = renderBanner();
   document.getElementById('view').innerHTML =
     ({status:renderStatus, schedule:renderSchedule, log:renderLog, facilities:renderFacilities, settings:renderSettings}[tab])();
+  if(tab==='schedule') sizeEventLabels();
 }
+// Stretch each event name from its first cell to the end of its bar in that week, so it
+// reads across the days instead of being cut off at the first one. The label ignores the
+// pointer, so clicks and drops land on whichever day is underneath.
+function sizeEventLabels(){
+  document.querySelectorAll('.ev.team .lbl[data-to]').forEach(lbl => {
+    const last = document.querySelector(`.day[data-date="${lbl.dataset.to}"]`);
+    if(!last) return;
+    const right = last.getBoundingClientRect().right - 6;
+    lbl.style.width = Math.max(right - lbl.getBoundingClientRect().left, 16) + 'px';
+  });
+}
+window.addEventListener('resize', () => { if(ready && document.body.dataset.view==='schedule') sizeEventLabels(); });
 
 // ---------- exports ----------
 function emailText(){
