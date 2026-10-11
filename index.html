@@ -132,6 +132,8 @@ body.placing .day{cursor:copy}
 .ev.team.first.last{border-radius:4px;width:100%}
 #askMsg{white-space:pre-line;margin:4px 0 16px}
 button.danger-fill{background:var(--red);border-color:var(--red);color:var(--panel)}
+.ev.sug{background:none;border:1px dashed var(--border);border-left:1px dashed var(--border);color:var(--muted);font-style:italic}
+.ev.sug:hover{border-color:var(--muted);color:var(--text)}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 @media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
@@ -543,6 +545,46 @@ function dayProblem(d){
 }
 // Weekdays minus the office day, holidays and days taken by team events/PTO/travel.
 // A weekday with a facility visit always counts as a used visit day (e.g. fly in and visit).
+// ---------- suggested schedule ----------
+// Earliest-due-first: walk the open visit days in order and give each one to the facility
+// whose next visit is due soonest, provided it's within a week of being due (so nothing is
+// suggested absurdly early). Bookings count as visits, so a booked facility's next
+// suggestion comes one full interval after the booking. Fly facilities are bundled onto
+// consecutive open days as one trip. Recomputed on every render, so any drag reshuffles it.
+const SUGGEST_LEAD_DAYS = 7;       // how early before its due date a facility may be suggested
+const TRIP_BUNDLE_DAYS = 21;       // fly facilities due within this of the trip ride along
+function openVisitDay(d){
+  return !isWeekend(d) && !isOffice(d) && !holidayOn(d) && !blockOn(d) && !db.visits.some(v => v.facilityId && v.date===d);
+}
+function suggestSchedule(from, to){   // to is exclusive; returns {date: {f, due}}
+  const pool = db.facilities.filter(f => !f.ancillary).map(f => {
+    const dates = db.visits.filter(v => v.facilityId===f.id).map(v => v.date).sort();
+    const weeks = typeInfo(f.type).weeks;
+    return {f, weeks, remote: f.type==='remote', due: dates.length ? addDays(dates[dates.length-1], weeks*7) : today()};
+  });
+  const out = {};
+  const place = (p, d) => { out[d] = {f:p.f, due:p.due}; p.due = addDays(d, p.weeks*7); };
+  const nextOpen = d => { for(d = addDays(d,1); d < to; d = addDays(d,1)) if(openVisitDay(d) && !out[d]) return d; return null; };
+  const byDue = (a,b) => a.due.localeCompare(b.due) || a.f.name.localeCompare(b.f.name);
+  for(let d = from; d < to; d = addDays(d,1)){
+    if(!openVisitDay(d) || out[d]) continue;
+    const pick = pool.filter(p => addDays(p.due, -SUGGEST_LEAD_DAYS) <= d).sort(byDue)[0];
+    if(!pick) continue;
+    place(pick, d);
+    if(pick.remote){
+      let day = d;
+      pool.filter(p => p.remote && p!==pick && addDays(p.due, -TRIP_BUNDLE_DAYS) <= d).sort(byDue)
+        .forEach(p => { day = nextOpen(day); if(day) place(p, day); });
+    }
+  }
+  return out;
+}
+// Suggestions for the visible calendar, starting tomorrow (today and earlier are history)
+function visibleSuggestions(){
+  const r = schedRange(), tomorrow = addDays(today(), 1);
+  return suggestSchedule(r.start > tomorrow ? r.start : tomorrow, r.end);
+}
+
 function weekCapacity(ws){
   let avail = 0, used = 0;
   for(let i=0;i<7;i++){
@@ -697,12 +739,17 @@ function renderSchedule(){
   </div>`;
 
 
-  // Sidebar: every facility, longest since last visit first (never visited at the top);
-  // colored by due status and dimmed once a visit is booked in time
-  const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || (a.last||'').localeCompare(b.last||'') || a.f.name.localeCompare(b.f.name));
+  // Sidebar: soonest next due first, where a booking counts as a visit (never visited at the
+  // top), so a facility drops down the list once it's booked; colored by due status, dimmed when booked
+  const sug = visibleSuggestions(), sugFor = {};
+  Object.keys(sug).sort().forEach(d => { if(!sugFor[sug[d].f.id]) sugFor[sug[d].f.id] = d; });
+  const nextDue = st => { const ds = db.visits.filter(v => v.facilityId===st.f.id).map(v => v.date).sort();
+    return ds.length ? addDays(ds[ds.length-1], st.info.weeks*7) : ''; };
+  const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || nextDue(a).localeCompare(nextDue(b)) || a.f.name.localeCompare(b.f.name));
   const chips = byLast.map(st => {
-    const booked = st.next && !st.planLate;
-    const sub = (st.f.ancillary ? 'ancillary · ' : '') + (st.last ? 'last visit '+ago(daysBetween(st.last, today())) : 'never visited');
+    const booked = !!st.next;
+    const sub = (st.f.ancillary ? 'ancillary · ' : '') + (st.next ? 'booked '+fmt(st.next)
+      : (st.last ? 'last visit '+ago(daysBetween(st.last, today())) : 'never visited') + (sugFor[st.f.id] ? ' · suggested '+fmt(sugFor[st.f.id]) : ''));
     const armed = placing && placing.kind==='fac' && placing.fid===st.f.id;
     return `<button class="pchip ${st.level}${booked?' booked':''}${armed?' armed':''}" draggable="true" data-drag="fac" data-fid="${st.f.id}" data-act="arm"
       title="${esc(statusText(st))}${st.next?' · next planned '+fmt(st.next):''}">${esc(st.f.name)}${st.f.type==='remote'?' ✈':''}<span class="sub">${sub}</span></button>`;
@@ -714,7 +761,7 @@ function renderSchedule(){
     <h3>Drag onto a day</h3>
     <div class="palette">${chips}</div>
     <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
-      : 'Drag onto a day, or tap and then tap a day. Click anything on the calendar to edit it.'}</p>
+      : 'Drag onto a day, or tap and then tap a day. Click anything on the calendar to edit it. <i>Gray dashed entries are suggestions</i>: click one to book it.'}</p>
   </aside>`;
 
   // Calendar
@@ -743,7 +790,10 @@ function renderSchedule(){
         return `<button class="ev${done?' done':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
           title="${esc(visitLabel(v))}${done?' · completed':' · planned'}">${done?'✓ ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
       }).join('');
-      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}</div>`;
+      const sg = sug[d];
+      const suggestion = sg ? `<button class="ev sug" data-act="accept-sug" data-fid="${sg.f.id}" data-date="${d}"
+          title="Suggested: ${esc(sg.f.name)} is due ${fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>` : '';
+      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${suggestion}</div>`;
     }
   }
   return h + '</div></div></div>';
@@ -1154,6 +1204,7 @@ document.addEventListener('click', async e => {
     case 'close': b.closest('dialog').close(); break;
     case 'new-visit': openVisit(null, {date: b.dataset.status==='completed' ? today() : addDays(today(), 1), facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
+    case 'accept-sug': dropOn(b.dataset.date, {kind:'fac', fid:b.dataset.fid}); break;
     case 'arm': {
       const p = KINDS[b.dataset.drag] ? {kind:b.dataset.drag} : {kind:'fac', fid:b.dataset.fid};
       const same = placing && placing.kind===p.kind && placing.fid===p.fid;
