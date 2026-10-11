@@ -1341,9 +1341,10 @@ function emailText(){
   const vs = rangeVisits(r);
   const lines = [];
   lines.push('Planned visits' + (s.yourName ? ' – '+s.yourName : ''));
-  lines.push(fmt(addDays(r.start,1),{month:'short',day:'numeric'})+' – '+fmt(addDays(r.end,-2),{month:'short',day:'numeric',year:'numeric'})+' (subject to change)');
+  lines.push(fmt(addDays(r.start,1),{month:'short',day:'numeric'})+' – '+fmt(addDays(r.end,-2),{month:'short',day:'numeric',year:'numeric'}));
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7), we = addDays(ws,7);
+    if(w===1) lines.push('', 'Tentative '+(r.weeks-1)+' week schedule:');
     lines.push('', 'Week of '+fmt(addDays(ws,1)));
     const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+whenText(v)+' – '+outLabel(v)]);
     for(let i=1; i<=5; i++){
