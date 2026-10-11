@@ -382,6 +382,7 @@ async function loadUser(){
       db = normalize(legacy);
       try{ localStorage.removeItem(LEGACY_KEY); }catch(e){}
     }else if(!cache){ db = blank(); }
+    if(!db.facilities.length){ ui.tab = 'tutorial'; saveUi(); }   // the tab choice is per browser, so reset it for a new person
     sync.version = 0; sync.dirty = true; ready = true;
     save();
     return;
@@ -1095,7 +1096,7 @@ function render(){
   if(!ready) return;
   document.body.classList.remove('signed-out');
   document.getElementById('who').innerHTML = `${esc(session.user)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="switch-user">Switch user</button>`;
-  const tab = ui.tab || (db.facilities.length ? 'status' : 'facilities');
+  const tab = ui.tab || (db.facilities.length ? 'status' : 'tutorial');
   document.body.dataset.view = tab;   // for CSS only; must not be data-tab, which the click handler treats as a tab button
   document.querySelectorAll('#tabs button').forEach(b => {
     b.classList.toggle('on', b.dataset.tab===tab);
