@@ -1343,6 +1343,9 @@ function sizeEventLabels(){
 window.addEventListener('resize', () => { if(ready && document.body.dataset.view==='schedule') sizeEventLabels(); });
 
 // ---------- exports ----------
+// Email entries use bare MM/DD, and MM/DD-MM/DD for a run of days
+const mmdd = d => d.slice(5,7)+'/'+d.slice(8,10);
+const mmddSpan = v => endOf(v)===v.date ? mmdd(v.date) : mmdd(v.date)+'-'+mmdd(endOf(v));
 function emailText(){
   const r = emailRange(), s = S();
   const vs = rangeVisits(r);
@@ -1353,11 +1356,11 @@ function emailText(){
     const ws = addDays(r.start, w*7), we = addDays(ws,7);
     if(w===1) lines.push('', 'Tentative '+(r.weeks-1)+' week schedule:');
     lines.push('', 'Week of '+fmt(addDays(ws,1)));
-    const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+whenText(v)+' – '+outLabel(v)]);
+    const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+mmddSpan(v)+' – '+outLabel(v)]);
     for(let i=1; i<=5; i++){
       const d = addDays(ws, i), hol = holidayOn(d);
-      if(hol) rows.push([d, '  '+fmtDay(d)+' – '+hol+' (holiday)']);
-      else if(officeHappens(d)) rows.push([d, '  '+fmtDay(d)+' – Office day']);
+      if(hol) rows.push([d, '  '+mmdd(d)+' – '+hol+' (holiday)']);
+      else if(officeHappens(d)) rows.push([d, '  '+mmdd(d)+' – Office day']);
     }
     rows.sort((a,b) => a[0].localeCompare(b[0]));
     if(!rows.length) lines.push('  No visits scheduled');
