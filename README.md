@@ -19,7 +19,7 @@ Accounts, data storage and Google lookups go through a Cloudflare Worker ([worke
 
 ## Accounts
 
-Each person signs in with their 9-digit employee ID and a 4-digit PIN they choose. Creating an account also needs the team code (the sign-up screen shows a hint). A browser stays signed in until **Sign out** or until its site data is cleared; **Data & settings** has **Change PIN** and **Sign out everywhere**.
+Each person signs in with their 9-digit employee ID and a 4-digit PIN they choose. A browser that isn't signed in first asks for the company name (the Worker's `TEAM_CODE`, matched loosely so "The Ensign Group" works); once answered, that browser goes straight to sign-in from then on. A browser stays signed in until **Sign out** or until its site data is cleared; **Data & settings** has **Change PIN** and **Sign out everywhere**.
 
 Five wrong PINs lock that employee ID for 15 minutes, and 20 wrong tries from one network lock that network for an hour.
 

@@ -29,7 +29,7 @@ nav button{background:none;border:none;border-bottom:3px solid transparent;paddi
 header.top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 header.top h1{margin:0}
 .linkish{background:none;border:none;padding:0;color:var(--accent);cursor:pointer;font:inherit;text-decoration:underline}
-body.signed-out nav,body.signed-out #who{display:none}
+body.signed-out nav,body.signed-out #who,body.gate header.top{display:none}
 .signin{max-width:380px;margin:24px auto}
 nav button.on{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
 nav .count{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--red);color:var(--panel);font-size:12px;text-align:center}
@@ -304,6 +304,7 @@ const LEGACY_KEY = 'facilityVisitTracker.v1';          // data from before the s
 const SESSION_KEY = 'facilityVisitTracker.session';    // {token, eeid, name, admin}
 const CACHE_PREFIX = 'facilityVisitTracker.cache.';    // + employee ID → {data, version, dirty}
 const UIKEY = 'facilityVisitTracker.ui';
+const TEAM_KEY = 'facilityVisitTracker.team';        // the company name this browser answered with; sent again at sign-up
 function blank(){ return {facilities:[], visits:[], trips:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:''}}; }
 function normalize(d){
   d = d || {};
@@ -486,8 +487,39 @@ async function signOut(all){
   try{ localStorage.removeItem(cacheKey()); }catch(e){}
   signedOut(all ? 'Signed out on every device.' : '');
 }
+// First visit in this browser: one question before anything else is shown.
+function showGate(msg){
+  ready = false;
+  document.body.classList.add('signed-out', 'gate');
+  document.getElementById('banner').innerHTML = '';
+  document.getElementById('view').innerHTML = `<form class="panel signin" id="gateForm" novalidate>
+    <label>Company name<input name="answer" autocomplete="organization" autocapitalize="words"></label>
+    <button class="primary" type="submit">Continue</button>
+    <p class="small warn" id="gateMsg">${esc(msg||'')}</p></form>`;
+  document.getElementById('gateForm').answer.focus();
+}
+document.addEventListener('submit', async e => {
+  if(e.target.id!=='gateForm') return;
+  e.preventDefault();
+  const f = e.target, msg = document.getElementById('gateMsg'), answer = f.answer.value.trim();
+  if(!answer){ f.answer.focus(); return; }
+  const btn = f.querySelector('button[type=submit]');
+  btn.disabled = true; msg.textContent = '';
+  try{
+    const r = await post('/team', {teamCode: answer});
+    if(!r.ok){ msg.textContent = await errorText(r); return; }
+    writeJson(TEAM_KEY, answer);
+    showSignIn();
+  }catch(err){
+    msg.textContent = 'Can’t reach the server ('+err.message+'). Check your connection and try again.';
+  }finally{
+    btn.disabled = false;
+  }
+});
 // mode: 'signin', 'signup' or 'reset' (the form name doubles as the server route)
 function showSignIn(msg, mode){
+  if(!readJson(TEAM_KEY)) return showGate();
+  document.body.classList.remove('gate');
   ready = false;
   mode = mode || 'signin';
   document.body.classList.add('signed-out');
@@ -503,8 +535,6 @@ function showSignIn(msg, mode){
     signup: `<h2 style="margin-top:0">Create an account</h2>${id}
       <label>Your name<input name="name" maxlength="60" autocomplete="name" placeholder="First and last name"></label>
       ${pin('Choose a PIN', 'pin', 'new-password')}${pin('PIN again', 'pin2', 'new-password')}
-      <label>Team code<input name="teamCode" autocomplete="off" autocapitalize="off"></label>
-      <p class="small muted" style="margin-top:-6px">Hint: Company Name</p>
       <button class="primary" type="submit">Create account</button>
       <p class="small">Already have an account? ${to('signin', 'Sign in')}</p>`,
     reset: `<h2 style="margin-top:0">Choose a new PIN</h2>
@@ -530,15 +560,15 @@ document.addEventListener('submit', async e => {
     : mode==='signup' && !v('name') ? 'Enter your name.'
     : mode==='reset' && !/^\d{6}$/.test(v('code')) ? 'Reset codes are 6 digits.'
     : !/^\d{4}$/.test(v('pin')) ? 'PINs are 4 digits.'
-    : f.pin2 && v('pin')!==v('pin2') ? 'The two PINs don’t match.'
-    : mode==='signup' && !v('teamCode') ? 'Enter the team code.' : '';
+    : f.pin2 && v('pin')!==v('pin2') ? 'The two PINs don’t match.' : '';
   if(problem){ msg.textContent = problem; return; }
   const btn = f.querySelector('button[type=submit]');
   btn.disabled = true; msg.textContent = '';
   try{
-    const r = await post('/'+mode, {eeid, name:v('name'), pin:v('pin'), code:v('code'), teamCode:v('teamCode')});
+    const r = await post('/'+mode, {eeid, name:v('name'), pin:v('pin'), code:v('code'), teamCode: readJson(TEAM_KEY)});
     const out = await r.json().catch(() => ({}));
     if(!r.ok){
+      if(out.teamCode && r.status===401){ try{ localStorage.removeItem(TEAM_KEY); }catch(e){} return showGate(); }   // the company name was changed on the server
       if(out.needCode) return showSignIn(out.error, 'reset');
       msg.textContent = out.error || ('Server problem (error '+r.status+')');
       return;

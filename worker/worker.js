@@ -8,13 +8,15 @@
 //
 // Settings (Cloudflare → Worker → Settings):
 //   GOOGLE_API_KEY   Secret       Google Places API (New) key
-//   TEAM_CODE        Secret       Needed once, to create an account (not case-sensitive)
+//   TEAM_CODE        Secret       The company name. A browser must answer it before it sees the sign-in screen,
+//                                 and sign-up checks it again. Matched loosely: "The Ensign Group" passes for "Ensign".
 //   PIN_PEPPER       Secret       Long random string mixed into every PIN hash. Changing it invalidates every PIN.
 //   ALLOWED_ORIGINS  Text         Comma-separated sites allowed to call this, e.g. https://yourname.github.io
 //                                 (add "null" temporarily to test from index.html opened straight from disk)
 //   DB               D1 binding   The database; tables are created automatically on first use
 //
-// Routes. Everything except signup/signin/reset needs header  Authorization: Bearer <session key>
+// Routes. Everything except team/signup/signin/reset needs header  Authorization: Bearer <session key>
+//   POST /team     {teamCode}                   → {}        (401 if wrong; the first-visit company-name question)
 //   POST /signup   {eeid, name, pin, teamCode}  → {token}
 //   POST /signin   {eeid, pin}                  → {token}   (403 + {needCode} if an admin reset the PIN)
 //   POST /reset    {eeid, code, pin}            → {token}   (one-time code from an admin; sets a new PIN)
@@ -70,17 +72,18 @@ export default {
         ? await request.json().catch(() => null) || {} : {};
 
       // ---------- signing in ----------
+      if (path === '/team' && request.method === 'POST') {
+        const team = await checkTeam(db, env, ip, body.teamCode);
+        return team ? send(team.body, team.status) : send({});
+      }
+
       if (path === '/signup' && request.method === 'POST') {
         const eeid = cleanId(body.eeid), name = cleanName(body.name), pin = String(body.pin || '');
         if (!eeid) return send({ error: 'Employee IDs are 9 digits.' }, 400);
         if (!name) return send({ error: 'Enter your name.' }, 400);
         if (!/^\d{4}$/.test(pin)) return send({ error: 'PINs are 4 digits.' }, 400);
-        if (await recent(db, 'team:' + ip, HOUR) >= TEAM_CODE_FAILS_PER_IP)
-          return send({ error: 'Too many wrong team codes. Try again in an hour.' }, 429);
-        if (!env.TEAM_CODE || !sameText(String(body.teamCode || '').trim().toLowerCase(), env.TEAM_CODE.trim().toLowerCase())) {
-          await note(db, 'team:' + ip);
-          return send({ error: 'That team code isn’t right.' }, 401);
-        }
+        const team = await checkTeam(db, env, ip, body.teamCode);
+        if (team) return send(team.body, team.status);
         if (await recent(db, 'signup', HOUR) >= SIGNUPS_PER_HOUR)
           return send({ error: 'Lots of people are signing up right now. Try again in an hour.' }, 429);
         const salt = randomHex(16), now = iso();
@@ -292,6 +295,17 @@ async function note(db, k) {
     db.prepare('INSERT INTO attempts (k, ts) VALUES (?, ?)').bind(k, Date.now()),
     db.prepare('DELETE FROM attempts WHERE ts < ?').bind(Date.now() - 24 * HOUR),   // keep the table small
   ]);
+}
+// The company-name question. Returns null when the answer is right, else the error to send.
+// Loose on purpose: case, punctuation and extra words are ignored as long as the name's words appear in order.
+async function checkTeam(db, env, ip, answer) {
+  if (await recent(db, 'team:' + ip, HOUR) >= TEAM_CODE_FAILS_PER_IP)
+    return { status: 429, body: { error: 'Too many wrong answers. Try again in an hour.', teamCode: true } };
+  const words = s => ' ' + String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+  const code = words(env.TEAM_CODE);
+  if (code.trim() && words(answer).includes(code)) return null;
+  await note(db, 'team:' + ip);
+  return { status: 401, body: { error: 'That’s not it. Check the spelling and try again.', teamCode: true } };
 }
 // Checked before the PIN itself, so a locked-out guesser can't learn when they hit the right one.
 async function lockedFor(db, eeid, ip) {
