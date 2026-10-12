@@ -145,6 +145,8 @@ body.placing .day{cursor:copy}
 button.danger-fill{background:var(--red);border-color:var(--red);color:var(--panel)}
 .ev.sug{background:none;border:1px dashed var(--border);border-left:1px dashed var(--border);color:var(--muted);font-style:italic}
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
+.ev.replan{background:none;border:1px solid var(--border);color:var(--accent);text-align:center}
+.ev.replan:hover{border-color:var(--accent)}
 .pchip.trip{border-left-color:var(--accent);background:var(--gray-bg)}
 .tut h2{margin:0 0 6px}
 .tut ul{margin:6px 0 10px;padding-left:20px}
@@ -182,6 +184,7 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
     <label id="otherWrap">What is it?<input name="label" placeholder="Team meeting, team project, PTO…"></label>
     <label id="endWrap">Last day (for multi-day meetings and projects)<input type="date" name="endDate"></label>
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
+    <label class="check" id="lockWrap"><input type="checkbox" name="locked"> <span>🔒 Lock to this day <span class="muted small">(Re-plan won’t move it)</span></span></label>
     <label class="check" id="concurWrap"><input type="checkbox" name="concur"> Entered in Concur</label>
     <div class="dlg-actions">
       <button type="button" class="danger" data-act="delete-visit" id="visitDel">Delete</button>
@@ -792,6 +795,55 @@ function tripDates(t, start){
   return out;
 }
 const tripSummary = t => DAYS[t.startDay].slice(0,3) + ': ' + t.days.map(x => x.travel ? 'Travel Day' : (fac(x.fid)||{name:'?'}).name).join(' → ');
+const inAnyTrip = fid => (db.trips||[]).some(t => t.days.some(x => x.fid===fid));
+
+// ---------- day order and re-planning ----------
+// Facility visits on the same day keep the order they were arranged in, top first
+const dayOrder = (a,b) => (a.order||0)-(b.order||0) || visitLabel(a).localeCompare(visitLabel(b));
+const dayVisits = d => db.visits.filter(v => v.facilityId && v.date===d).sort(dayOrder);
+const nextOrder = d => dayVisits(d).reduce((m, v) => Math.max(m, (v.order||0)+1), 0);
+// Trip and fly facilities may have flights and hotels booked, and ancillary ones aren't on a rotation
+const alwaysFixed = f => !f || f.type==='remote' || f.ancillary || inAnyTrip(f.id);
+// What re-planning never moves: the past, locked visits, and the facilities above
+const pinned = v => v.date<=today() || !!v.locked || alwaysFixed(fac(v.facilityId));
+// Dropping a visit onto another visit on the same day puts it above (or below) that one
+function reorder(id, ontoId, below){
+  const v = db.visits.find(x => x.id===id), o = db.visits.find(x => x.id===ontoId);
+  if(!v || !o || !v.facilityId || !o.facilityId || v.date!==o.date) return false;
+  const list = dayVisits(v.date).filter(x => x!==v);
+  list.splice(list.indexOf(o) + (below?1:0), 0, v);
+  list.forEach((x, i) => { x.order = i; });
+  save();
+  return true;
+}
+// Keep the top visit on day d (locked there), take every other movable visit off d and
+// after it, and rebook the same number of drive visits on the soonest-due-first suggestions.
+// Trip and fly suggestions in that stretch are left as suggestions for you to book.
+async function replan(d){
+  const [keep, ...rest] = dayVisits(d);
+  const bumped = rest.filter(v => !pinned(v));
+  const later = db.visits.filter(v => v.facilityId && v.date>d && !pinned(v));
+  const moving = bumped.concat(later);
+  if(!keep || !moving.length){ notify('Everything else on and after '+fmtDay(d)+' is locked, on a trip or a ✈ visit, so there’s nothing to re-plan.', 'Nothing to move'); return; }
+  const plural = (n, w) => n+' '+w+(n===1?'':'s');
+  const msg = 'Keeps '+visitLabel(keep)+' on '+fmtDay(d)+' and locks it there.\n'
+    + (bumped.length ? 'Takes '+bumped.map(visitLabel).join(', ')+' off this day, then re' : 'Re')
+    + '-plans '+plural(later.length, 'unlocked drive visit')+' after it, soonest due first.\n\n'
+    + 'Trips, ✈ visits and locked (🔒) visits stay where they are.';
+  if(!await ask(msg, {title:'Re-plan from '+fmtDay(d)+'?', yes:'Re-plan'})) return;
+  keep.locked = true;
+  const gone = new Set(moving.map(v => v.id)), notes = {};
+  moving.forEach(v => { if(v.notes && !notes[v.facilityId]) notes[v.facilityId] = v.notes; });
+  db.visits = db.visits.filter(v => !gone.has(v.id));
+  const sug = suggestSchedule(addDays(d, 1), addDays(d, 366));
+  const days = Object.keys(sug).sort().filter(x => sug[x].f && !sug[x].trip && sug[x].f.type!=='remote').slice(0, moving.length);
+  days.forEach(x => {
+    const fid = sug[x].f.id;
+    db.visits.push({id:uid(), facilityId:fid, date:x, status:'planned', notes:notes[fid]||'', label:'', endDate:'', concur:false, order:nextOrder(x)});
+    delete notes[fid];   // a visit's notes ride along to that facility's first new visit
+  });
+  save(); toast('Re-planned '+plural(days.length, 'visit')+(days.length ? ' through '+fmt(days[days.length-1]) : ''));
+}
 
 function suggestSchedule(from, to){   // to is exclusive; returns {date: {f, due, trip?, start?} | {travel, trip, start}}
   const trips = (db.trips||[]).filter(validTrip);
@@ -999,7 +1051,7 @@ function emailRange(){
   return {start, weeks, end: addDays(start, weeks*7)};
 }
 function rangeVisits(r){
-  return db.visits.filter(v => overlaps(v, r.start, r.end)).sort((a,b)=>a.date.localeCompare(b.date) || visitLabel(a).localeCompare(visitLabel(b)));
+  return db.visits.filter(v => overlaps(v, r.start, r.end)).sort((a,b)=>a.date.localeCompare(b.date) || dayOrder(a,b));
 }
 function renderSchedule(){
   const r = schedRange();
@@ -1070,15 +1122,17 @@ function renderSchedule(){
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
         const f = fac(v.facilityId), done = d<=t;
         return `<button class="ev${done?' done':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
-          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}">${done?'✓ ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
+          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}${v.locked?' · locked to this day':''}">${done?'✓ ':''}${v.locked?'🔒 ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
       }).join('');
+      const replanBtn = d > t && vs.filter(v => v.facilityId && v.date===d).length > 1
+        ? `<button class="ev replan" data-act="replan" data-date="${d}" title="Keep the top visit on this day and re-plan the unlocked drive visits after it. Drag visits up or down to choose which stays.">↻ Re-plan</button>` : '';
       const sg = sug[d];
       const suggestion = !sg ? '' : sg.trip
         ? `<button class="ev sug" data-act="accept-sug" data-tid="${sg.trip.id}" data-start="${sg.start}"
             title="Suggested trip: ${esc(sg.trip.name)}${sg.f ? ' · '+esc(sg.f.name)+' is due '+fmt(sg.due) : ''}. Click to book the whole trip.">${sg.travel ? 'Travel Day' : esc(sg.f.name)+(sg.f.type==='remote'?' ✈':'')}</button>`
         : `<button class="ev sug" data-act="accept-sug" data-fid="${sg.f.id}" data-date="${d}"
             title="Suggested: ${esc(sg.f.name)} ${addDays(sg.due, -SUGGEST_LEAD_DAYS) > d ? 'isn’t due until '+fmt(sg.due)+', but this day is open' : 'is due '+fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>`;
-      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${suggestion}</div>`;
+      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${replanBtn}${suggestion}</div>`;
     }
   }
   return h + '</div></div></div>';
@@ -1100,7 +1154,7 @@ async function bookTrip(t, start){
   ds.forEach((d, i) => {
     const day = t.days[i];
     if(day.travel){ if(!db.visits.some(v => kindOf(v)==='travel' && v.date===d)) db.visits.push({id:uid(), facilityId:'', kind:'travel', label:KINDS.travel, date:d, endDate:'', status:'planned', notes:'', concur:false}); }
-    else if(!db.visits.some(v => v.facilityId===day.fid && v.date===d)) db.visits.push({id:uid(), facilityId:day.fid, date:d, status:statusByDate(d), notes:'', label:'', endDate:'', concur:false});
+    else if(!db.visits.some(v => v.facilityId===day.fid && v.date===d)) db.visits.push({id:uid(), facilityId:day.fid, date:d, status:statusByDate(d), notes:'', label:'', endDate:'', concur:false, order:nextOrder(d)});
   });
   save(); toast('Booked '+t.name+': '+fmt(ds[0])+' – '+fmt(ds[ds.length-1]));
 }
@@ -1125,6 +1179,7 @@ async function dropOn(date, item){
     if(v.facilityId){
       const why = dayProblem(date);
       if(why && !await ask(fmtDay(date)+' '+why+'.', {title:'Move this visit?', yes:'Move anyway'})) return;
+      v.order = nextOrder(date);   // joins the bottom of its new day
       v.date = date;
     }else{
       const len = daysBetween(v.date, endOf(v));
@@ -1143,7 +1198,7 @@ async function dropOn(date, item){
   const why = dayProblem(date);
   if(why && !await ask(fmtDay(date)+' '+why+'.', {title:'Book '+f.name+'?', yes:'Book anyway'})) return;
   const past = date < today();
-  db.visits.push({id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false});
+  db.visits.push({id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false, order:nextOrder(date)});
   save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date));
 }
 function setPlacing(p){
@@ -1177,6 +1232,11 @@ document.addEventListener('drop', e => {
   e.preventDefault();
   let item; try{ item = JSON.parse(e.dataTransfer.getData('text/plain')); }catch(x){ return; }
   if(placing) setPlacing(null);
+  const onto = e.target.closest('.ev[data-id]');
+  if(item.kind==='visit' && onto && onto.dataset.id!==item.id) {
+    const box = onto.getBoundingClientRect();
+    if(reorder(item.id, onto.dataset.id, e.clientY > box.top + box.height/2)) return;
+  }
   dropOn(day.dataset.date, item);
 });
 document.addEventListener('keydown', e => {
@@ -1287,6 +1347,7 @@ function renderTutorial(){
         <li>Tap <b>This month</b> and drag facilities onto the days you plan to visit. The list is sorted soonest due first.</li>
         <li>Gray dashed suggestions fill the open days. Tap one that makes sense to book it.</li>
         <li>Add team meetings, PTO, Bank Days and Travel Days with the buttons above the calendar. Drag anything on the calendar to move it.</li>
+        <li>If something comes up and you have to fit an extra visit in, drag it onto that day, then drag it up or down to put the one that must happen on top and tap <b>↻ Re-plan</b>. The top visit stays and is locked to that day, and the other drive visits from there on are re-planned. Trips, ✈ visits and anything you've locked (🔒, from a visit's Edit window) stay put.</li>
       </ul>
       ${go('schedule', 'Schedule')}
     </div>
@@ -1418,6 +1479,12 @@ function syncVisitForm(){
   document.getElementById('otherWrap').hidden = !other;
   document.getElementById('endWrap').hidden = !other;
   document.getElementById('concurWrap').hidden = other || !(visitForm.date.value && visitForm.date.value <= today());
+  // Trip, fly and ancillary visits never move, so their lock is always on
+  const fixed = !other && alwaysFixed(fac(visitForm.facilityId.value));
+  document.getElementById('lockWrap').hidden = other;
+  document.getElementById('lockWrap').title = fixed ? 'Trip, ✈ and ancillary visits always stay put' : '';
+  visitForm.locked.disabled = fixed;
+  if(fixed) visitForm.locked.checked = true; else if(visitForm.locked.dataset.was) visitForm.locked.checked = visitForm.locked.dataset.was==='1';
 }
 function openVisit(v, defaults){
   editingVisit = v || null;
@@ -1431,6 +1498,8 @@ function openVisit(v, defaults){
   visitForm.endDate.value = d.endDate || '';
   visitForm.notes.value = d.notes || '';
   visitForm.concur.checked = !!d.concur;
+  visitForm.locked.checked = !!d.locked;
+  visitForm.locked.dataset.was = d.locked ? '1' : '0';
   document.getElementById('visitTitle').textContent = v ? (v.facilityId ? 'Edit entry' : KINDS[kindOf(v)]) : !d.facilityId ? KINDS[newKind] : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
   document.getElementById('visitDel').hidden = !v;
   syncVisitForm();
@@ -1438,6 +1507,7 @@ function openVisit(v, defaults){
 }
 visitForm.facilityId.addEventListener('change', syncVisitForm);
 visitForm.date.addEventListener('change', syncVisitForm);
+visitForm.locked.addEventListener('change', () => { visitForm.locked.dataset.was = visitForm.locked.checked ? '1' : '0'; });
 visitForm.addEventListener('submit', async e => {
   e.preventDefault();
   const f = visitForm;
@@ -1450,7 +1520,10 @@ visitForm.addEventListener('submit', async e => {
     if(why && !await ask(fmtDay(f.date.value)+' '+why+'.', {title:'Schedule this visit?', yes:'Schedule anyway'})) return;
   }
   const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
-    endDate:isFac?'':f.endDate.value, status:isFac?statusByDate(f.date.value):'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
+    endDate:isFac?'':f.endDate.value, status:isFac?statusByDate(f.date.value):'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked,
+    locked:isFac && !f.locked.disabled && f.locked.checked};
+  // a visit new to its day goes to the bottom of that day
+  if(isFac && (!editingVisit || editingVisit.date!==data.date || editingVisit.facilityId!==data.facilityId)) data.order = nextOrder(data.date);
   if(!isFac) data.kind = editingVisit ? kindOf(editingVisit) : newKind;
   if(data.kind==='bank' && !bankSpanOk(data)){ notify(BANK_SPAN_MSG, 'Bank Day limit'); return; }
   if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
@@ -1632,6 +1705,7 @@ document.addEventListener('click', async e => {
     case 'close': b.closest('dialog').close(); break;
     case 'new-visit': openVisit(null, {date: b.dataset.status==='completed' ? today() : addDays(today(), 1), facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
+    case 'replan': replan(b.dataset.date); break;
     case 'accept-sug': b.dataset.tid ? dropOn(b.dataset.start, {kind:'trip', tid:b.dataset.tid}) : dropOn(b.dataset.date, {kind:'fac', fid:b.dataset.fid}); break;
     case 'arm': {
       const k = b.dataset.drag;
