@@ -185,6 +185,7 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
     <label id="otherWrap">What is it?<input name="label" placeholder="Team meeting, team project, PTO…"></label>
     <label id="endWrap">Last day (for multi-day meetings and projects)<input type="date" name="endDate"></label>
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
+    <label class="check" id="acqWrap"><input type="checkbox" name="acquisition"> <span>Acquisition <span class="muted small">(allows Bank Days in the month it ends)</span></span></label>
     <label class="check" id="lockWrap"><input type="checkbox" name="locked"> <span>🔒 Lock to this day <span class="muted small">(Re-plan won’t move it)</span></span></label>
     <label class="check" id="concurWrap"><input type="checkbox" name="concur"> Entered in Concur</label>
     <div class="dlg-actions">
@@ -948,6 +949,16 @@ const BANK_LIMIT = 2, BANK_LIMIT_MSG = 'Only two bank days may be used in a cale
 // Bank days are tied to the month they're earned for, so one period can't run into the next month
 const BANK_SPAN_MSG = 'A bank day period can’t span two calendar months';
 const bankSpanOk = e => endOf(e).slice(0,7) === e.date.slice(0,7);
+// Bank days are earned by an acquisition: they can only be used in the calendar month an
+// acquisition-tagged team project ends in. Returns why `entry` can't go there, or ''.
+function bankMonthProblem(entry){
+  const m = entry.date.slice(0,7), first = m+'-01';
+  const projects = db.visits.filter(v => kindOf(v)==='team' && endOf(v).slice(0,7)===m);
+  if(projects.some(v => v.acquisition)) return '';
+  const spans = projects.find(v => v.date < first);
+  return spans ? 'Bank days are only for acquisitions. If the '+fmt(spans.date)+'–'+fmt(endOf(spans))+' project was an acquisition, please edit the project and tag it as such.'
+    : 'Bank Days can only be used in the month after an acquisition.';
+}
 function bankDaysUsed(entries){
   const used = {};
   entries.filter(v => kindOf(v)==='bank').forEach(v => {
@@ -1189,6 +1200,7 @@ async function dropOn(date, item){
     openVisit(null, {facilityId:'', kind:'team', date, endDate:date, status:'planned'});
     return;
   }
+  if(item.kind==='bank'){ const why = bankMonthProblem({date}); if(why){ notify(why, 'Bank Day'); return; } }
   if(item.kind==='bank' && !bankLimitOk({id:'new', facilityId:'', kind:'bank', date, endDate:''})){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
   if(item.kind==='pto' || item.kind==='bank' || item.kind==='travel'){
     // a travel day often includes a visit (fly in, visit), so only PTO/Bank Day ask about one
@@ -1210,6 +1222,8 @@ async function dropOn(date, item){
       const len = daysBetween(v.date, endOf(v));
       const moved = Object.assign({}, v, {date, endDate: v.endDate ? addDays(date, len) : ''});
       if(kindOf(v)==='bank' && !bankSpanOk(moved)){ notify(BANK_SPAN_MSG, 'Bank Day limit'); return; }
+      const why = kindOf(v)==='bank' && moved.date.slice(0,7)!==v.date.slice(0,7) && bankMonthProblem(moved);
+      if(why){ notify(why, 'Bank Day'); return; }
       if(kindOf(v)==='bank' && !bankLimitOk(moved)){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
       v.date = moved.date;
       v.endDate = moved.endDate;
@@ -1507,6 +1521,7 @@ function syncVisitForm(){
   // Trip, fly and ancillary visits never move, so their lock is always on
   const fixed = !other && alwaysFixed(fac(visitForm.facilityId.value));
   document.getElementById('lockWrap').hidden = other;
+  document.getElementById('acqWrap').hidden = !other || (editingVisit ? kindOf(editingVisit) : newKind)!=='team';
   document.getElementById('lockWrap').title = fixed ? 'Trip, ✈ and ancillary visits always stay put' : '';
   visitForm.locked.disabled = fixed;
   if(fixed) visitForm.locked.checked = true; else if(visitForm.locked.dataset.was) visitForm.locked.checked = visitForm.locked.dataset.was==='1';
@@ -1524,6 +1539,7 @@ function openVisit(v, defaults){
   visitForm.notes.value = d.notes || '';
   visitForm.concur.checked = !!d.concur;
   visitForm.locked.checked = !!d.locked;
+  visitForm.acquisition.checked = !!d.acquisition;
   visitForm.locked.dataset.was = d.locked ? '1' : '0';
   document.getElementById('visitTitle').textContent = v ? (v.facilityId ? 'Edit entry' : KINDS[kindOf(v)]) : !d.facilityId ? KINDS[newKind] : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
   document.getElementById('visitDel').hidden = !v;
@@ -1550,7 +1566,11 @@ visitForm.addEventListener('submit', async e => {
   // a visit new to its day goes to the bottom of that day
   if(isFac && (!editingVisit || editingVisit.date!==data.date || editingVisit.facilityId!==data.facilityId)) data.order = nextOrder(data.date);
   if(!isFac) data.kind = editingVisit ? kindOf(editingVisit) : newKind;
+  data.acquisition = data.kind==='team' && f.acquisition.checked;
   if(data.kind==='bank' && !bankSpanOk(data)){ notify(BANK_SPAN_MSG, 'Bank Day limit'); return; }
+  // a Bank Day already on the calendar can still be edited in place; only a new month is checked
+  const why = data.kind==='bank' && (!editingVisit || editingVisit.date.slice(0,7)!==data.date.slice(0,7)) && bankMonthProblem(data);
+  if(why){ notify(why, 'Bank Day'); return; }
   if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
   if(editingVisit) Object.assign(editingVisit, data); else db.visits.push(Object.assign({id:uid()}, data));
   visitDlg.close(); save();
