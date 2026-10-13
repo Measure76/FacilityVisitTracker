@@ -1068,11 +1068,14 @@ function visitRow(v, opts){
 
 const monthOf = s => s.slice(0,8)+'01';
 const addMonths = (s, n) => { const d = parse(monthOf(s)); d.setMonth(d.getMonth()+n); return iso(d); };
-// The calendar always opens on a month: its top row is the week holding the 1st
+// The calendar always opens on a month: its top row is the week holding the 1st, and it
+// shows whole weeks through the last day of the last month chosen
+const CAL_MONTHS = [1,2,3,4,5,6];
 function schedRange(){
-  const start = sundayOf(ui.schedMonth || monthOf(today()));   // calendar weeks run Sunday–Saturday
-  const weeks = ui.calWeeks || 8;
-  return {start, weeks, end: addDays(start, weeks*7)}; // end exclusive
+  const first = ui.schedMonth || monthOf(today()), months = ui.calMonths || 2;
+  const start = sundayOf(first);   // calendar weeks run Sunday–Saturday
+  const end = addDays(sundayOf(addDays(addMonths(first, months), -1)), 7);   // exclusive
+  return {start, weeks: daysBetween(start, end)/7, end};
 }
 // Copy for email ignores where the calendar is scrolled: this week plus the next four
 function emailRange(){
@@ -1089,7 +1092,7 @@ function renderSchedule(){
     <button data-act="sched-today">This month</button>
     <button data-act="sched-move" data-n="1" title="Next month">▶</button>
     <label>Month of<input type="date" id="schedStart" value="${ui.schedMonth || monthOf(today())}"></label>
-    <label>Show<select id="schedWeeks">${[1,2,3,4,5,6,8,10,12].map(n=>`<option value="${n}" ${n===r.weeks?'selected':''}>${n} week${n>1?'s':''}</option>`).join('')}</select></label>
+    <label>Show<select id="schedMonths">${CAL_MONTHS.map(n=>`<option value="${n}" ${n===(ui.calMonths||2)?'selected':''}>${n} month${n>1?'s':''}</option>`).join('')}</select></label>
     <span class="grow"></span>
     <button data-act="email-text">Copy for email</button>
     <button data-act="ics">Download calendar (.ics)</button>
@@ -1825,7 +1828,7 @@ document.addEventListener('change', e => {
     save(); return;
   }
   if(t.id==='schedStart' && t.value){ ui.schedMonth = monthOf(t.value); }
-  else if(t.id==='schedWeeks'){ ui.calWeeks = parseInt(t.value,10); }
+  else if(t.id==='schedMonths'){ ui.calMonths = parseInt(t.value,10); }
   else if(t.id==='logFrom'){ ui.logFrom = t.value; }
   else if(t.id==='logTo'){ ui.logTo = t.value; }
   else if(t.id==='logOpen'){ ui.logOpen = t.checked; }
