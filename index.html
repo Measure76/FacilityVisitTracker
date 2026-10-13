@@ -131,6 +131,7 @@ body.placing .day{cursor:copy}
 .day.today .dnum{background:var(--accent);color:var(--accent-text);border-radius:9px;padding:0 6px}
 .dtag{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .day.holiday .dtag{color:var(--amber);font-weight:600}
+.concur{margin-top:3px;font-size:11px;font-weight:700;color:var(--red);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ev{display:block;width:100%;margin-top:3px;padding:2px 5px;border:none;border-left:3px solid var(--accent);border-radius:4px;background:var(--blue-bg);color:var(--text);font:inherit;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .ev.done{border-left-color:var(--green);background:var(--green-bg);color:var(--green)}
 .ev.team .lbl{position:relative;z-index:1;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
@@ -760,6 +761,26 @@ function holidaysFor(y){
 // Next year's New Year's Day can be observed on Dec 31, so check both years
 const holidayOn = d => { const y = +d.slice(0,4); return holidaysFor(y)[d] || holidaysFor(y+1)[d] || ''; };
 const isWeekend = d => { const wd = parse(d).getDay(); return wd===0 || wd===6; };
+// Concur expense reports are due on the 4th-to-last business day of the month (three
+// business days left after it). Concur's own holidays, not the team's: only Thanksgiving,
+// Dec 25 and Memorial Day are skipped; the day after Thanksgiving, Dec 26 and Dec 31 count.
+// Memorial Day is assumed, not confirmed, so a May whose date it moves is flagged.
+const concurCache = {};
+function concurDue(ym){
+  if(ym in concurCache) return concurCache[ym];
+  const [y, m] = ym.split('-').map(Number);
+  const h = holidaysFor(y);
+  const walk = skipMemorial => {
+    let d = iso(new Date(y, m, 0)), n = 0;
+    for(;; d = addDays(d, -1)){
+      const name = h[d];
+      const off = name==='Thanksgiving' || d.endsWith('-12-25') || (skipMemorial && name==='Memorial Day');
+      if(!isWeekend(d) && !off && ++n===4) return d;
+    }
+  };
+  const date = walk(true);
+  return concurCache[ym] = {date, unverified: date !== walk(false)};
+}
 // Why a facility visit on this day would be unusual, or '' if it's a normal visit day
 function dayProblem(d){
   if(d < today()) return '';   // the past is a record, not a plan: nothing to warn about
@@ -1132,7 +1153,11 @@ function renderSchedule(){
             title="Suggested trip: ${esc(sg.trip.name)}${sg.f ? ' · '+esc(sg.f.name)+' is due '+fmt(sg.due) : ''}. Click to book the whole trip.">${sg.travel ? 'Travel Day' : esc(sg.f.name)+(sg.f.type==='remote'?' ✈':'')}</button>`
         : `<button class="ev sug" data-act="accept-sug" data-fid="${sg.f.id}" data-date="${d}"
             title="Suggested: ${esc(sg.f.name)} ${addDays(sg.due, -SUGGEST_LEAD_DAYS) > d ? 'isn’t due until '+fmt(sg.due)+', but this day is open' : 'is due '+fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>`;
-      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${replanBtn}${suggestion}</div>`;
+      const cd = concurDue(d.slice(0,7));
+      const concur = cd.date!==d ? '' : cd.unverified
+        ? '<div class="concur" title="Concur expense report due. Unverified: assumes Memorial Day is a Concur holiday.">CONCUR DUE?</div>'
+        : '<div class="concur" title="Concur expense report due">CONCUR DUE</div>';
+      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${replanBtn}${suggestion}${concur}</div>`;
     }
   }
   return h + '</div></div></div>';
