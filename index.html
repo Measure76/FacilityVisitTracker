@@ -148,6 +148,8 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
 .ev.team.sug{background:none;color:var(--muted)}   /* a tentative Travel Day */
 .side.over{outline:2px dashed var(--accent);outline-offset:-2px}
+.drop-hint{display:none;margin:0 0 10px;padding:10px;border:1px dashed var(--accent);border-radius:6px;color:var(--accent);font-size:13px;font-weight:600;text-align:center}
+body.dragging-visit .drop-hint{display:block}
 .pchip.trip{border-left-color:var(--accent);background:var(--gray-bg)}
 .tut h2{margin:0 0 6px}
 .tut ul{margin:6px 0 10px;padding-left:20px}
@@ -1091,7 +1093,9 @@ function renderSchedule(){
     <label>Month of<input type="date" id="schedStart" value="${ui.schedMonth || monthOf(today())}"></label>
     <label>Show<select id="schedMonths">${CAL_MONTHS.map(n=>`<option value="${n}" ${n===(ui.calMonths||2)?'selected':''}>${n} month${n>1?'s':''}</option>`).join('')}</select></label>
     <button data-act="fill" title="Fill the open days through the email's four tentative weeks with gray tentative entries. Solid entries stay put.">Fill next 4 weeks</button>
+    ${db.visits.some(v => v.tentative) ? '<button data-act="lock-all" title="Lock every gray entry where it is">Lock all</button>' : ''}
     <span class="grow"></span>
+    ${grayInEmail() ? `<span class="small muted">${grayText(grayInEmail())}</span>` : ''}
     <button data-act="email-text">Copy for email</button>
     <button data-act="ics">Download calendar (.ics)</button>
   </div>`;
@@ -1116,7 +1120,7 @@ function renderSchedule(){
   const quick = ['team','pto','bank','travel'].map(k =>
     `<button class="pchip ${k==='team'?'team':'team '+k}${placing && placing.kind===k?' armed':''}" draggable="true" data-drag="${k}" data-act="arm">+ ${KINDS[k]}</button>`).join('');
   h += `<div class="palette quick">${quick}</div>
-    <div class="sched"><aside class="side">
+    <div class="sched"><aside class="side"><div class="drop-hint">Drop here to clear the day</div>
     ${(db.trips||[]).filter(validTrip).length ? `<h3>Trips</h3><div class="palette">${(db.trips||[]).filter(validTrip).map(t =>
       `<button class="pchip trip${placing && placing.tid===t.id?' armed':''}" draggable="true" data-drag="trip" data-tid="${t.id}" data-act="arm" title="${esc(tripSummary(t))}">${esc(t.name)}<span class="sub">${DAYS[t.startDay].slice(0,3)} · ${t.days.length} day${t.days.length>1?'s':''}${tripSug[t.id] ? ' · suggested '+fmt(tripSug[t.id]) : ''}</span></button>`).join('')}</div>` : ''}
     <h3>Drag onto a day</h3>
@@ -1258,6 +1262,7 @@ document.addEventListener('dragstart', e => {
   e.dataTransfer.setData('text/plain', JSON.stringify(item));
   e.dataTransfer.effectAllowed = item.kind==='visit' ? 'move' : 'copy';
   draggingVisit = item.kind==='visit';
+  document.body.classList.toggle('dragging-visit', draggingVisit);
 });
 // Dragging an entry from the calendar back onto the sidebar takes it off its day
 let draggingVisit = false;
@@ -1269,7 +1274,7 @@ async function unbook(id){
   db.visits = db.visits.filter(x => x!==v);
   save(); toast('Cleared '+fmtDay(v.date));
 }
-document.addEventListener('dragend', () => { draggingVisit = false; document.querySelectorAll('.side.over').forEach(x => x.classList.remove('over')); });
+document.addEventListener('dragend', () => { draggingVisit = false; document.body.classList.remove('dragging-visit'); document.querySelectorAll('.side.over').forEach(x => x.classList.remove('over')); });
 document.addEventListener('dragover', e => {
   const side = draggingVisit && e.target.closest && e.target.closest('.side');
   if(side){ e.preventDefault(); side.classList.add('over'); return; }
@@ -1509,8 +1514,12 @@ function emailWarning(){
     if(weekCapacity(ws).avail && !db.visits.some(v => solid(v) && overlaps(v, ws, addDays(ws,7)))) empty.push(fmt(addDays(ws,1),{month:'short',day:'numeric'}));
   }
   if(r.weeks-1 !== 4) return 'This shows '+(r.weeks-1)+' tentative weeks; 4 are required.';
-  return empty.length ? 'A 4-week tentative schedule is required. Nothing is locked in yet for the week'+(empty.length>1?'s':'')+' of '+empty.join(', ')+'.' : '';
+  const gray = grayInEmail(), grayMsg = gray ? ' '+grayText(gray)+'.' : '';
+  return empty.length ? 'A 4-week tentative schedule is required. Nothing is locked in yet for the week'+(empty.length>1?'s':'')+' of '+empty.join(', ')+'.'+grayMsg : grayMsg.trim();
 }
+// Gray entries the email would leave out: from today through the end of its weeks
+const grayInEmail = () => db.visits.filter(v => v.tentative && v.date >= today() && v.date < emailRange().end).length;
+const grayText = n => n+' gray entr'+(n===1?'y isn’t':'ies aren’t')+' in the email until locked';
 const icsEsc = s => String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
 function icsFile(){
   const r = schedRange(), s = S();
@@ -1769,6 +1778,12 @@ document.addEventListener('click', async e => {
     case 'new-visit': openVisit(null, {date: b.dataset.status==='completed' ? today() : addDays(today(), 1), facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
     case 'fill': fillWeeks(); break;
+    case 'lock-all': {
+      const gray = db.visits.filter(x => x.tentative);
+      gray.forEach(lockTentative);
+      save(); toast('Locked '+gray.length+' entr'+(gray.length===1?'y':'ies'));
+      break;
+    }
     case 'lock': if(v){ const trip = v.tripId && tripById(v.tripId), when = trip ? v.tripStart : v.date;
       lockTentative(v); save(); toast('Locked '+(trip ? trip.name : visitLabel(v))+' on '+fmtDay(when)); } break;
     case 'arm': {
