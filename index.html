@@ -146,8 +146,8 @@ body.placing .day{cursor:copy}
 button.danger-fill{background:var(--red);border-color:var(--red);color:var(--panel)}
 .ev.sug{background:none;border:1px dashed var(--border);border-left:1px dashed var(--border);color:var(--muted);font-style:italic}
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
-.ev.replan{background:none;border:1px solid var(--border);color:var(--accent);text-align:center}
-.ev.replan:hover{border-color:var(--accent)}
+.ev.team.sug{background:none;color:var(--muted)}   /* a tentative Travel Day */
+.side.over{outline:2px dashed var(--accent);outline-offset:-2px}
 .pchip.trip{border-left-color:var(--accent);background:var(--gray-bg)}
 .tut h2{margin:0 0 6px}
 .tut ul{margin:6px 0 10px;padding-left:20px}
@@ -185,7 +185,6 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
     <label id="otherWrap">What is it?<input name="label" placeholder="Team meeting, team project, PTO…"></label>
     <label id="endWrap">Last day (for multi-day meetings and projects)<input type="date" name="endDate"></label>
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
-    <label class="check" id="lockWrap"><input type="checkbox" name="locked"> <span>🔒 Lock to this day <span class="muted small">(Re-plan won’t move it)</span></span></label>
     <label class="check" id="concurWrap"><input type="checkbox" name="concur"> Entered in Concur</label>
     <div class="dlg-actions">
       <button type="button" class="danger" data-act="delete-visit" id="visitDel">Delete</button>
@@ -798,7 +797,8 @@ function dayProblem(d){
 // whose next visit is due soonest, provided it's within a week of being due (so nothing is
 // suggested absurdly early). Bookings count as visits, so a booked facility's next
 // suggestion comes one full interval after the booking. Fly facilities are bundled onto
-// consecutive open days as one trip. Recomputed on every render, so any drag reshuffles it.
+// consecutive open days as one trip. Only Fill puts suggestions on the calendar, as tentative
+// (gray) entries; anything placed by hand is solid and stays where it was put.
 const SUGGEST_LEAD_DAYS = 7;       // how early before its due date a facility may be suggested
 const TRIP_BUNDLE_DAYS = 21;       // fly facilities due within this of the trip ride along
 function openVisitDay(d){
@@ -823,10 +823,6 @@ const inAnyTrip = fid => (db.trips||[]).some(t => t.days.some(x => x.fid===fid))
 const dayOrder = (a,b) => (a.order||0)-(b.order||0) || visitLabel(a).localeCompare(visitLabel(b));
 const dayVisits = d => db.visits.filter(v => v.facilityId && v.date===d).sort(dayOrder);
 const nextOrder = d => dayVisits(d).reduce((m, v) => Math.max(m, (v.order||0)+1), 0);
-// Trip and fly facilities may have flights and hotels booked, and ancillary ones aren't on a rotation
-const alwaysFixed = f => !f || f.type==='remote' || f.ancillary || inAnyTrip(f.id);
-// What re-planning never moves: the past, locked visits, and the facilities above
-const pinned = v => v.date<=today() || !!v.locked || alwaysFixed(fac(v.facilityId));
 // Dropping a visit onto another visit on the same day puts it above (or below) that one
 function reorder(id, ontoId, below){
   const v = db.visits.find(x => x.id===id), o = db.visits.find(x => x.id===ontoId);
@@ -837,33 +833,33 @@ function reorder(id, ontoId, below){
   save();
   return true;
 }
-// Keep the top visit on day d (locked there), take every other movable visit off d and
-// after it, and rebook the same number of drive visits on the soonest-due-first suggestions.
-// Trip and fly suggestions in that stretch are left as suggestions for you to book.
-async function replan(d){
-  const [keep, ...rest] = dayVisits(d);
-  const bumped = rest.filter(v => !pinned(v));
-  const later = db.visits.filter(v => v.facilityId && v.date>d && !pinned(v));
-  const moving = bumped.concat(later);
-  if(!keep || !moving.length){ notify('Everything else on and after '+fmtDay(d)+' is locked, on a trip or a ✈ visit, so there’s nothing to re-plan.', 'Nothing to move'); return; }
-  const plural = (n, w) => n+' '+w+(n===1?'':'s');
-  const msg = 'Keeps '+visitLabel(keep)+' on '+fmtDay(d)+' and locks it there.\n'
-    + (bumped.length ? 'Takes '+bumped.map(visitLabel).join(', ')+' off this day, then re' : 'Re')
-    + '-plans '+plural(later.length, 'unlocked drive visit')+' after it, soonest due first.\n\n'
-    + 'Trips, ✈ visits and locked (🔒) visits stay where they are.';
-  if(!await ask(msg, {title:'Re-plan from '+fmtDay(d)+'?', yes:'Re-plan'})) return;
-  keep.locked = true;
-  const gone = new Set(moving.map(v => v.id)), notes = {};
-  moving.forEach(v => { if(v.notes && !notes[v.facilityId]) notes[v.facilityId] = v.notes; });
-  db.visits = db.visits.filter(v => !gone.has(v.id));
-  const sug = suggestSchedule(addDays(d, 1), addDays(d, 366));
-  const days = Object.keys(sug).sort().filter(x => sug[x].f && !sug[x].trip && sug[x].f.type!=='remote').slice(0, moving.length);
-  days.forEach(x => {
-    const fid = sug[x].f.id;
-    db.visits.push({id:uid(), facilityId:fid, date:x, status:'planned', notes:notes[fid]||'', label:'', endDate:'', concur:false, order:nextOrder(x)});
-    delete notes[fid];   // a visit's notes ride along to that facility's first new visit
+// Tentative entries come only from Fill. From tomorrow on, Fill may replace them; once their
+// day passes they vanish, so only solid entries are ever counted as visits.
+const solid = v => !v.tentative;
+// Tentative entries that are gone: past ones, and ones under PTO, a Bank Day or a team event
+const staleTentative = v => v.tentative && (v.date < today() ||
+  db.visits.some(b => !b.facilityId && !b.tentative && kindOf(b)!=='travel' && b.date<=v.date && endOf(b)>=v.date));
+function dropStaleTentative(){
+  if(db.visits.some(staleTentative)) db.visits = db.visits.filter(v => !staleTentative(v));
+}
+// Fill: clear the tentative entries from tomorrow on and lay suggestions down as new ones
+// through the end of the email's four tentative weeks. Solid entries are never touched.
+function fillWeeks(){
+  const from = addDays(today(), 1), to = emailRange().end;
+  db.visits = db.visits.filter(v => !(v.tentative && v.date >= from));
+  const sug = suggestSchedule(from, to), days = Object.keys(sug).sort();
+  days.forEach(d => {
+    const x = sug[d], trip = x.trip ? {tripId:x.trip.id, tripStart:x.start} : {};
+    if(x.travel){ if(!db.visits.some(v => kindOf(v)==='travel' && v.date===d)) db.visits.push(Object.assign({id:uid(), facilityId:'', kind:'travel', label:KINDS.travel, date:d, endDate:'', status:'planned', notes:'', concur:false, tentative:true}, trip)); }
+    else db.visits.push(Object.assign({id:uid(), facilityId:x.f.id, date:d, status:'planned', notes:'', label:'', endDate:'', concur:false, order:nextOrder(d), tentative:true}, trip));
   });
-  save(); toast('Re-planned '+plural(days.length, 'visit')+(days.length ? ' through '+fmt(days[days.length-1]) : ''));
+  save();
+  toast(days.length ? 'Filled '+days.length+' day'+(days.length===1?'':'s')+' through '+fmt(days[days.length-1])+'. Click a gray entry to lock it.' : 'No open days to fill');
+}
+// Make an entry solid; a tentative trip locks all its days together
+function lockTentative(v){
+  const group = v.tripId ? db.visits.filter(x => x.tentative && x.tripId===v.tripId && x.tripStart===v.tripStart) : [v];
+  group.forEach(x => { delete x.tentative; delete x.tripId; delete x.tripStart; });
 }
 
 function suggestSchedule(from, to){   // to is exclusive; returns {date: {f, due, trip?, start?} | {travel, trip, start}}
@@ -988,16 +984,17 @@ function download(name, text, type){
 function facilityStatus(f){
   const t = today();
   const mine = db.visits.filter(v => v.facilityId===f.id);
-  const done = mine.filter(v => v.date<=t).map(v => v.date).sort();
+  const done = mine.filter(v => solid(v) && v.date<=t).map(v => v.date).sort();
   const planned = mine.filter(v => v.date>t).map(v => v.date).sort();
   const info = typeInfo(f.type);
   const last = done.length ? done[done.length-1] : null;
   const due = last && !f.ancillary ? addDays(last, info.weeks*7) : null;   // ancillary: no regular visits, so never due
   const next = planned[0] || null;
+  const nextTentative = !!next && !mine.some(v => v.date===next && solid(v));
   const daysLeft = due ? daysBetween(t, due) : null;
   const level = f.ancillary ? 'ancillary' : !last ? 'never' : daysLeft<0 ? 'overdue' : daysLeft<=S().soonDays ? 'soon' : 'ok';
   const planLate = !!(next && due && next>due);
-  return {f, info, last, due, next, daysLeft, level, planLate};
+  return {f, info, last, due, next, nextTentative, daysLeft, level, planLate};
 }
 function allStatus(){
   return db.facilities.map(facilityStatus).sort((a,b) => {
@@ -1038,7 +1035,7 @@ function renderStatus(){
       <div class="meta">
         <span>Last visit: <b>${r.last ? fmt(r.last)+'</b> ('+ago(daysBetween(r.last,today()))+')' : '</b>none'}</span>
         ${r.due ? `<span>Due by: <b>${fmt(r.due)}</b></span>` : ''}
-        <span>Next planned: ${r.next ? `<b>${fmt(r.next)}</b>${r.planLate?' <span class="warn">(after due date)</span>':''}` : (r.level!=='ok' && r.level!=='ancillary' ? '<span class="warn">not scheduled</span>' : '<span class="muted">not scheduled</span>')}</span>
+        <span>Next planned: ${r.next ? `<b>${fmt(r.next)}</b>${r.nextTentative?' <span class="muted">(tentative)</span>':''}${r.planLate?' <span class="warn">(after due date)</span>':''}` : (r.level!=='ok' && r.level!=='ancillary' ? '<span class="warn">not scheduled</span>' : '<span class="muted">not scheduled</span>')}</span>
       </div>
       <div class="actions">
         <button class="small" data-act="new-visit" data-fid="${r.f.id}" data-status="planned">Plan visit</button>
@@ -1093,6 +1090,7 @@ function renderSchedule(){
     <button data-act="sched-move" data-n="1" title="Next month">▶</button>
     <label>Month of<input type="date" id="schedStart" value="${ui.schedMonth || monthOf(today())}"></label>
     <label>Show<select id="schedMonths">${CAL_MONTHS.map(n=>`<option value="${n}" ${n===(ui.calMonths||2)?'selected':''}>${n} month${n>1?'s':''}</option>`).join('')}</select></label>
+    <button data-act="fill" title="Fill the open days through the email's four tentative weeks with gray tentative entries. Solid entries stay put.">Fill next 4 weeks</button>
     <span class="grow"></span>
     <button data-act="email-text">Copy for email</button>
     <button data-act="ics">Download calendar (.ics)</button>
@@ -1108,8 +1106,8 @@ function renderSchedule(){
     return ds.length ? addDays(ds[ds.length-1], st.info.weeks*7) : ''; };
   const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || nextDue(a).localeCompare(nextDue(b)) || a.f.name.localeCompare(b.f.name));
   const chips = byLast.map(st => {
-    const booked = !!st.next;
-    const sub = (st.f.ancillary ? 'ancillary · ' : '') + (st.next ? 'booked '+fmt(st.next)
+    const booked = !!st.next && !st.nextTentative;
+    const sub = (st.f.ancillary ? 'ancillary · ' : '') + (st.next ? (st.nextTentative ? 'tentative ' : 'booked ')+fmt(st.next)
       : (st.last ? 'last visit '+ago(daysBetween(st.last, today())) : 'never visited') + (sugFor[st.f.id] ? ' · suggested '+fmt(sugFor[st.f.id]) : ''));
     const armed = placing && placing.kind==='fac' && placing.fid===st.f.id;
     return `<button class="pchip ${st.level}${booked?' booked':''}${armed?' armed':''}" draggable="true" data-drag="fac" data-fid="${st.f.id}" data-act="arm"
@@ -1124,7 +1122,7 @@ function renderSchedule(){
     <h3>Drag onto a day</h3>
     <div class="palette">${chips}</div>
     <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
-      : 'Drag onto a day, or tap and then tap a day. Click anything on the calendar to edit it. <i>Gray dashed entries are suggestions</i>: click one to book it.'}</p>
+      : 'Drag onto a day, or tap and then tap a day. Anything placed by hand is locked to its day; drag it back over here to clear the day. <b>Fill next 4 weeks</b> adds <i>gray dashed tentative entries</i>: click one to lock it. Click a solid entry to edit it.'}</p>
   </aside>`;
 
   // Calendar
@@ -1149,26 +1147,26 @@ function renderSchedule(){
         // The name sits in the bar's first cell this week and runs across to the bar's last cell (see sizeEventLabels)
         const rowEnd = addDays(ws, 6), barEnd = endOf(v) < rowEnd ? endOf(v) : rowEnd;
         const label = labelHere ? `<span class="lbl" data-to="${barEnd}">${esc(visitLabel(v))}</span>` : '&nbsp;';
-        return `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
+        return v.tentative
+          ? `<button class="ev team sug ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="lock" title="Tentative ${esc(visitLabel(v))}${v.tripId ? ' on '+esc((tripById(v.tripId)||{name:'a trip'}).name)+'. Click to lock the whole trip.' : '. Click to lock it.'}">${label}</button>`
+          : `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
       }).join('');
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
-        const f = fac(v.facilityId), done = d<=t;
+        const f = fac(v.facilityId), fly = f&&f.type==='remote'?' ✈':'';
+        if(v.tentative){
+          const trip = v.tripId && tripById(v.tripId), due = f && facilityStatus(f).due;
+          return `<button class="ev sug" draggable="true" data-drag="visit" data-id="${v.id}" data-act="lock"
+            title="Tentative: ${esc(visitLabel(v))}${due ? ' is due '+fmt(due) : ''}.${trip ? ' On '+esc(trip.name)+'. Click to lock the whole trip.' : ' Click to lock it.'}">${esc(visitLabel(v))}${fly}</button>`;
+        }
+        const done = d<=t;
         return `<button class="ev${done?' done':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
-          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}${v.locked?' · locked to this day':''}">${done?'✓ ':''}${v.locked?'🔒 ':''}${esc(visitLabel(v))}${f&&f.type==='remote'?' ✈':''}</button>`;
+          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}">${done?'✓ ':''}${esc(visitLabel(v))}${fly}</button>`;
       }).join('');
-      const replanBtn = d > t && vs.filter(v => v.facilityId && v.date===d).length > 1
-        ? `<button class="ev replan" data-act="replan" data-date="${d}" title="Keep the top visit on this day and re-plan the unlocked drive visits after it. Drag visits up or down to choose which stays.">↻ Re-plan</button>` : '';
-      const sg = sug[d];
-      const suggestion = !sg ? '' : sg.trip
-        ? `<button class="ev sug" data-act="accept-sug" data-tid="${sg.trip.id}" data-start="${sg.start}"
-            title="Suggested trip: ${esc(sg.trip.name)}${sg.f ? ' · '+esc(sg.f.name)+' is due '+fmt(sg.due) : ''}. Click to book the whole trip.">${sg.travel ? 'Travel Day' : esc(sg.f.name)+(sg.f.type==='remote'?' ✈':'')}</button>`
-        : `<button class="ev sug" data-act="accept-sug" data-fid="${sg.f.id}" data-date="${d}"
-            title="Suggested: ${esc(sg.f.name)} ${addDays(sg.due, -SUGGEST_LEAD_DAYS) > d ? 'isn’t due until '+fmt(sg.due)+', but this day is open' : 'is due '+fmt(sg.due)}. Click to book it.">${esc(sg.f.name)}${sg.f.type==='remote'?' ✈':''}</button>`;
       const cd = concurDue(d.slice(0,7));
       const concur = cd.date!==d ? '' : cd.unverified
         ? '<div class="concur" title="Concur expense report due. Unverified: assumes Memorial Day is a Concur holiday.">CONCUR DUE?</div>'
         : '<div class="concur" title="Concur expense report due">CONCUR DUE</div>';
-      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${replanBtn}${suggestion}${concur}</div>`;
+      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${concur}</div>`;
     }
   }
   return h + '</div></div></div>';
@@ -1189,8 +1187,10 @@ async function bookTrip(t, start){
   if(problems.length && !await ask(problems.join('\n'), {title:'Book '+t.name+'?', yes:'Book anyway'})) return;
   ds.forEach((d, i) => {
     const day = t.days[i];
-    if(day.travel){ if(!db.visits.some(v => kindOf(v)==='travel' && v.date===d)) db.visits.push({id:uid(), facilityId:'', kind:'travel', label:KINDS.travel, date:d, endDate:'', status:'planned', notes:'', concur:false}); }
-    else if(!db.visits.some(v => v.facilityId===day.fid && v.date===d)) db.visits.push({id:uid(), facilityId:day.fid, date:d, status:statusByDate(d), notes:'', label:'', endDate:'', concur:false, order:nextOrder(d)});
+    const there = db.visits.find(v => day.travel ? kindOf(v)==='travel' && v.date===d : v.facilityId===day.fid && v.date===d);
+    if(there){ lockTentative(there); return; }
+    if(day.travel) db.visits.push({id:uid(), facilityId:'', kind:'travel', label:KINDS.travel, date:d, endDate:'', status:'planned', notes:'', concur:false});
+    else db.visits.push({id:uid(), facilityId:day.fid, date:d, status:statusByDate(d), notes:'', label:'', endDate:'', concur:false, order:nextOrder(d)});
   });
   save(); toast('Booked '+t.name+': '+fmt(ds[0])+' – '+fmt(ds[ds.length-1]));
 }
@@ -1204,7 +1204,7 @@ async function dropOn(date, item){
   if(item.kind==='bank' && !bankLimitOk({id:'new', facilityId:'', kind:'bank', date, endDate:''})){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
   if(item.kind==='pto' || item.kind==='bank' || item.kind==='travel'){
     // a travel day often includes a visit (fly in, visit), so only PTO/Bank Day ask about one
-    const booked = item.kind==='travel' ? [] : db.visits.filter(v => v.facilityId && v.date===date);
+    const booked = item.kind==='travel' ? [] : db.visits.filter(v => v.facilityId && solid(v) && v.date===date);
     if(booked.length && !await ask(fmtDay(date)+' already has '+booked.map(visitLabel).join(', ')+'.', {title:'Add '+KINDS[item.kind]+'?', yes:'Add anyway'})) return;
     db.visits.push({id:uid(), facilityId:'', kind:item.kind, label:KINDS[item.kind], date, endDate:'', status:'planned', notes:'', concur:false});
     save(); toast(KINDS[item.kind]+' on '+fmtDay(date)+'. Click it to make it longer.');
@@ -1212,12 +1212,14 @@ async function dropOn(date, item){
   }
   if(item.kind==='visit'){
     const v = db.visits.find(x => x.id===item.id);
-    if(!v || v.date===date) return;
+    if(!v) return;
+    if(v.date===date){ if(v.tentative){ lockTentative(v); save(); } return; }
     if(v.facilityId){
       const why = dayProblem(date);
       if(why && !await ask(fmtDay(date)+' '+why+'.', {title:'Move this visit?', yes:'Move anyway'})) return;
       v.order = nextOrder(date);   // joins the bottom of its new day
       v.date = date;
+      delete v.tripId; delete v.tripStart; delete v.tentative;   // placed by hand, so locked
     }else{
       const len = daysBetween(v.date, endOf(v));
       const moved = Object.assign({}, v, {date, endDate: v.endDate ? addDays(date, len) : ''});
@@ -1227,13 +1229,16 @@ async function dropOn(date, item){
       if(kindOf(v)==='bank' && !bankLimitOk(moved)){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
       v.date = moved.date;
       v.endDate = moved.endDate;
+      delete v.tripId; delete v.tripStart; delete v.tentative;
     }
     save(); toast('Moved to '+fmtDay(date));
     return;
   }
   const f = fac(item.fid);
   if(!f) return;
-  if(db.visits.some(v => v.facilityId===f.id && v.date===date)){ toast(f.name+' is already on '+fmtDay(date)); return; }
+  const there = db.visits.find(v => v.facilityId===f.id && v.date===date);
+  if(there && there.tentative){ lockTentative(there); save(); toast('Locked '+f.name+' on '+fmtDay(date)); return; }
+  if(there){ toast(f.name+' is already on '+fmtDay(date)); return; }
   const why = dayProblem(date);
   if(why && !await ask(fmtDay(date)+' '+why+'.', {title:'Book '+f.name+'?', yes:'Book anyway'})) return;
   const past = date < today();
@@ -1252,8 +1257,22 @@ document.addEventListener('dragstart', e => {
   const item = k==='fac' ? {kind:'fac', fid:el.dataset.fid} : k==='trip' ? {kind:'trip', tid:el.dataset.tid} : KINDS[k] ? {kind:k} : {kind:'visit', id:el.dataset.id};
   e.dataTransfer.setData('text/plain', JSON.stringify(item));
   e.dataTransfer.effectAllowed = item.kind==='visit' ? 'move' : 'copy';
+  draggingVisit = item.kind==='visit';
 });
+// Dragging an entry from the calendar back onto the sidebar takes it off its day
+let draggingVisit = false;
+async function unbook(id){
+  const v = db.visits.find(x => x.id===id);
+  if(!v) return;
+  const record = solid(v) && v.facilityId && isDone(v);
+  if((record || v.notes) && !await ask(visitLabel(v)+' · '+whenText(v)+(record ? '\nThis is a completed visit.' : '')+(v.notes ? '\nIts notes go with it.' : ''), {title:'Take this off the calendar?', yes:'Remove', danger:true})) return;
+  db.visits = db.visits.filter(x => x!==v);
+  save(); toast('Cleared '+fmtDay(v.date));
+}
+document.addEventListener('dragend', () => { draggingVisit = false; document.querySelectorAll('.side.over').forEach(x => x.classList.remove('over')); });
 document.addEventListener('dragover', e => {
+  const side = draggingVisit && e.target.closest && e.target.closest('.side');
+  if(side){ e.preventDefault(); side.classList.add('over'); return; }
   const day = e.target.closest && e.target.closest('.day[data-date]');
   if(!day) return;
   e.preventDefault();
@@ -1261,12 +1280,21 @@ document.addEventListener('dragover', e => {
   day.classList.add('over');
 });
 document.addEventListener('dragleave', e => {
+  const side = e.target.closest && e.target.closest('.side.over');
+  if(side && !side.contains(e.relatedTarget)) side.classList.remove('over');
   const day = e.target.closest && e.target.closest('.day.over');
   if(day && !day.contains(e.relatedTarget)) day.classList.remove('over');
 });
 document.addEventListener('drop', e => {
   const day = e.target.closest && e.target.closest('.day[data-date]');
-  document.querySelectorAll('.day.over').forEach(x => x.classList.remove('over'));
+  document.querySelectorAll('.day.over, .side.over').forEach(x => x.classList.remove('over'));
+  const side = draggingVisit && e.target.closest && e.target.closest('.side');
+  if(side){
+    e.preventDefault();
+    let item; try{ item = JSON.parse(e.dataTransfer.getData('text/plain')); }catch(x){ return; }
+    if(item.kind==='visit') unbook(item.id);
+    return;
+  }
   if(!day) return;
   e.preventDefault();
   let item; try{ item = JSON.parse(e.dataTransfer.getData('text/plain')); }catch(x){ return; }
@@ -1290,7 +1318,7 @@ function logRange(){
   return {from, to, open: !!ui.logOpen};
 }
 function logVisits(r){
-  return db.visits.filter(v => v.facilityId && isDone(v) && v.date>=r.from && v.date<=r.to && (!r.open || !v.concur))
+  return db.visits.filter(v => v.facilityId && solid(v) && isDone(v) && v.date>=r.from && v.date<=r.to && (!r.open || !v.concur))
     .sort((a,b)=>a.date.localeCompare(b.date));
 }
 function renderLog(){
@@ -1384,9 +1412,9 @@ function renderTutorial(){
       <h2>Step 3 · Build your schedule</h2>
       <ul>
         <li>Tap <b>This month</b> and drag facilities onto the days you plan to visit. The list is sorted soonest due first.</li>
-        <li>Gray dashed suggestions fill the open days. Tap one that makes sense to book it.</li>
+        <li>Tap <b>Fill next 4 weeks</b> to fill the open days with gray dashed tentative entries, soonest due first. Tap one that makes sense to lock it. Tentative entries aren't in the email, and they disappear once their day passes.</li>
         <li>Add team meetings, PTO, Bank Days and Travel Days with the buttons above the calendar. Drag anything on the calendar to move it.</li>
-        <li>If something comes up and you have to fit an extra visit in, drag it onto that day, then drag it up or down to put the one that must happen on top and tap <b>↻ Re-plan</b>. The top visit stays and is locked to that day, and the other drive visits from there on are re-planned. Trips, ✈ visits and anything you've locked (🔒, from a visit's Edit window) stay put.</li>
+        <li>Anything you drag onto a day is locked there (solid). To clear a day, drag its entry back onto the facility list. If plans change, tap <b>Fill next 4 weeks</b> again: it redoes the gray entries around the solid ones.</li>
       </ul>
       ${go('schedule', 'Schedule')}
     </div>
@@ -1395,7 +1423,7 @@ function renderTutorial(){
       <ul>
         <li>If you visit some facilities together, in the same order, build a trip under <b>Trips</b> at the bottom of the Facilities tab.</li>
         <li>Pick the weekday it usually starts on and add each day in order, including travel days.</li>
-        <li>Suggestions then keep the trip together, and dragging the trip onto the calendar books every day at once.</li>
+        <li>Fill then keeps the trip together, and dragging the trip onto the calendar, or tapping a gray one, locks every day at once.</li>
       </ul>
       ${go('facilities', 'Facilities')}
     </div>`;
@@ -1413,6 +1441,7 @@ function renderBanner(){
 
 function render(){
   if(!ready) return;
+  dropStaleTentative();
   document.body.classList.remove('signed-out');
   document.getElementById('who').innerHTML = `${esc(session.name||session.eeid)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="sign-out">Sign out</button>`;
   document.querySelector('#tabs [data-tab=admin]').hidden = !session.admin;
@@ -1448,9 +1477,10 @@ window.addEventListener('resize', () => { if(ready && document.body.dataset.view
 // Email entries use bare MM/DD, and MM/DD-MM/DD for a run of days
 const mmdd = d => d.slice(5,7)+'/'+d.slice(8,10);
 const mmddSpan = v => endOf(v)===v.date ? mmdd(v.date) : mmdd(v.date)+'-'+mmdd(endOf(v));
+// The email and .ics carry only solid entries, never Fill's tentative ones
 function emailText(){
   const r = emailRange();
-  const vs = rangeVisits(r);
+  const vs = rangeVisits(r).filter(solid);
   const lines = [];
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7), we = addDays(ws,7);
@@ -1476,17 +1506,17 @@ function emailWarning(){
   const empty = [];
   for(let w=1; w<r.weeks; w++){
     const ws = addDays(r.start, w*7);
-    if(weekCapacity(ws).avail && !db.visits.some(v => overlaps(v, ws, addDays(ws,7)))) empty.push(fmt(addDays(ws,1),{month:'short',day:'numeric'}));
+    if(weekCapacity(ws).avail && !db.visits.some(v => solid(v) && overlaps(v, ws, addDays(ws,7)))) empty.push(fmt(addDays(ws,1),{month:'short',day:'numeric'}));
   }
   if(r.weeks-1 !== 4) return 'This shows '+(r.weeks-1)+' tentative weeks; 4 are required.';
-  return empty.length ? 'A 4-week tentative schedule is required. Nothing is planned yet for the week'+(empty.length>1?'s':'')+' of '+empty.join(', ')+'.' : '';
+  return empty.length ? 'A 4-week tentative schedule is required. Nothing is locked in yet for the week'+(empty.length>1?'s':'')+' of '+empty.join(', ')+'.' : '';
 }
 const icsEsc = s => String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
 function icsFile(){
   const r = schedRange(), s = S();
   const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
   const out = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Facility Visit Tracker//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
-  rangeVisits(r).filter(v => endOf(v)>=today()).forEach(v => {
+  rangeVisits(r).filter(v => solid(v) && endOf(v)>=today()).forEach(v => {
     const f = v.facilityId ? fac(v.facilityId) : null;
     out.push('BEGIN:VEVENT', 'UID:'+v.id+'@facility-visit-tracker', 'DTSTAMP:'+stamp,
       'DTSTART;VALUE=DATE:'+v.date.replace(/-/g,''), 'DTEND;VALUE=DATE:'+addDays(endOf(v),1).replace(/-/g,''),
@@ -1518,12 +1548,6 @@ function syncVisitForm(){
   document.getElementById('otherWrap').hidden = !other;
   document.getElementById('endWrap').hidden = !other;
   document.getElementById('concurWrap').hidden = other || !(visitForm.date.value && visitForm.date.value <= today());
-  // Trip, fly and ancillary visits never move, so their lock is always on
-  const fixed = !other && alwaysFixed(fac(visitForm.facilityId.value));
-  document.getElementById('lockWrap').hidden = other;
-  document.getElementById('lockWrap').title = fixed ? 'Trip, ✈ and ancillary visits always stay put' : '';
-  visitForm.locked.disabled = fixed;
-  if(fixed) visitForm.locked.checked = true; else if(visitForm.locked.dataset.was) visitForm.locked.checked = visitForm.locked.dataset.was==='1';
 }
 function openVisit(v, defaults){
   editingVisit = v || null;
@@ -1537,8 +1561,6 @@ function openVisit(v, defaults){
   visitForm.endDate.value = d.endDate || '';
   visitForm.notes.value = d.notes || '';
   visitForm.concur.checked = !!d.concur;
-  visitForm.locked.checked = !!d.locked;
-  visitForm.locked.dataset.was = d.locked ? '1' : '0';
   document.getElementById('visitTitle').textContent = v ? (v.facilityId ? 'Edit entry' : KINDS[kindOf(v)]) : !d.facilityId ? KINDS[newKind] : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
   document.getElementById('visitDel').hidden = !v;
   syncVisitForm();
@@ -1546,7 +1568,6 @@ function openVisit(v, defaults){
 }
 visitForm.facilityId.addEventListener('change', syncVisitForm);
 visitForm.date.addEventListener('change', syncVisitForm);
-visitForm.locked.addEventListener('change', () => { visitForm.locked.dataset.was = visitForm.locked.checked ? '1' : '0'; });
 visitForm.addEventListener('submit', async e => {
   e.preventDefault();
   const f = visitForm;
@@ -1559,8 +1580,7 @@ visitForm.addEventListener('submit', async e => {
     if(why && !await ask(fmtDay(f.date.value)+' '+why+'.', {title:'Schedule this visit?', yes:'Schedule anyway'})) return;
   }
   const data = {date:f.date.value, facilityId:f.facilityId.value, label:isFac?'':f.label.value.trim(),
-    endDate:isFac?'':f.endDate.value, status:isFac?statusByDate(f.date.value):'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked,
-    locked:isFac && !f.locked.disabled && f.locked.checked};
+    endDate:isFac?'':f.endDate.value, status:isFac?statusByDate(f.date.value):'planned', notes:f.notes.value.trim(), concur:isFac&&f.concur.checked};
   // a visit new to its day goes to the bottom of that day
   if(isFac && (!editingVisit || editingVisit.date!==data.date || editingVisit.facilityId!==data.facilityId)) data.order = nextOrder(data.date);
   if(!isFac) data.kind = editingVisit ? kindOf(editingVisit) : newKind;
@@ -1569,7 +1589,8 @@ visitForm.addEventListener('submit', async e => {
   const why = data.kind==='bank' && (!editingVisit || editingVisit.date.slice(0,7)!==data.date.slice(0,7)) && bankMonthProblem(data);
   if(why){ notify(why, 'Bank Day'); return; }
   if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
-  if(editingVisit) Object.assign(editingVisit, data); else db.visits.push(Object.assign({id:uid()}, data));
+  if(editingVisit){ Object.assign(editingVisit, data); delete editingVisit.locked; lockTentative(editingVisit); }
+  else db.visits.push(Object.assign({id:uid()}, data));
   visitDlg.close(); save();
 });
 
@@ -1747,8 +1768,9 @@ document.addEventListener('click', async e => {
     case 'close': b.closest('dialog').close(); break;
     case 'new-visit': openVisit(null, {date: b.dataset.status==='completed' ? today() : addDays(today(), 1), facilityId: b.dataset.other ? '' : b.dataset.fid || (db.facilities.length ? db.facilities.slice().sort(byName)[0].id : ''), status: b.dataset.status || 'planned'}); break;
     case 'edit-visit': openVisit(v); break;
-    case 'replan': replan(b.dataset.date); break;
-    case 'accept-sug': b.dataset.tid ? dropOn(b.dataset.start, {kind:'trip', tid:b.dataset.tid}) : dropOn(b.dataset.date, {kind:'fac', fid:b.dataset.fid}); break;
+    case 'fill': fillWeeks(); break;
+    case 'lock': if(v){ const trip = v.tripId && tripById(v.tripId), when = trip ? v.tripStart : v.date;
+      lockTentative(v); save(); toast('Locked '+(trip ? trip.name : visitLabel(v))+' on '+fmtDay(when)); } break;
     case 'arm': {
       const k = b.dataset.drag;
       const p = k==='trip' ? {kind:'trip', tid:b.dataset.tid} : KINDS[k] ? {kind:k} : {kind:'fac', fid:b.dataset.fid};
