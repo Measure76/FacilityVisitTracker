@@ -13,3 +13,9 @@ keep_vars = true
 binding = "DB"
 database_name = "facility-tracker"
 database_id = "ad1ec226-c72c-4850-9be5-3c221431edfd"
+
+# Bundle ../index.html into the Worker so it can serve the app itself (GET /)
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true

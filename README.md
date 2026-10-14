@@ -32,6 +32,10 @@ Five wrong PINs lock that employee ID for 15 minutes, and 20 wrong tries from on
 
 Each tracker is saved automatically to the team server, so it's available on any device and survives a cleared browser. The browser keeps a copy so unsaved changes survive a dropped connection. **Data & settings → Export** saves a copy as a file at any time.
 
+## Hosting on the Worker
+
+The Worker also serves the app itself at `https://facility-lookup.measure-717.workers.dev/`, for networks that block github.io. `index.html` is bundled into the Worker when it's deployed, so **any change to `index.html` needs `npx wrangler@4 deploy` from the `worker` folder** as well as a push, or the Worker keeps serving the old page. Calls from that page are same-origin, so it needs no `ALLOWED_ORIGINS` entry.
+
 ## Hosting on GitHub Pages
 
 1. Create a repository and add `index.html`.

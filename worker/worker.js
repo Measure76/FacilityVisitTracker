@@ -32,6 +32,9 @@
 //   POST /admin/role     {eeid, admin}          → {}
 //   GET  /admin/history?eeid=ID                 → {versions:[{version, savedAt, by, bytes}]}
 //   POST /admin/restore  {eeid, version}        → {version}
+//   GET  /                                      → the app (index.html, bundled in at deploy)
+
+import PAGE from '../index.html';
 
 const MAX_DATA_BYTES = 1500000;
 const HISTORY_KEEP = 50;            // saved versions kept per person
@@ -47,8 +50,14 @@ let schemaReady = false;
 
 export default {
   async fetch(request, env) {
-    const origin = request.headers.get('Origin') || '';
-    const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+    const self = new URL(request.url);
+    // The page itself, for networks that block github.io. It's public; everything it does still signs in.
+    if (request.method === 'GET' && (self.pathname === '/' || self.pathname === '/index.html'))
+      return new Response(PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } });
+    // A page served from here calls home on the same origin, where browsers may leave Origin off
+    const sameOrigin = request.headers.get('Sec-Fetch-Site') === 'same-origin';
+    const origin = request.headers.get('Origin') || (sameOrigin ? self.origin : '');
+    const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean).concat(self.origin);
     const cors = {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
