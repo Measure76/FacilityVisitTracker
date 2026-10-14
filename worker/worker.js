@@ -329,7 +329,7 @@ async function checkTeam(db, env, ip, answer) {
   if (await recent(db, 'team:' + ip, HOUR) >= TEAM_CODE_FAILS_PER_IP)
     return { status: 429, body: { error: 'Too many wrong answers. Try again in an hour.', teamCode: true } };
   const words = s => ' ' + String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
-  const code = words(env.TEAM_CODE);
+  const code = words(await secret(env, 'TEAM_CODE'));
   if (code.trim() && words(answer).includes(code)) return null;
   await note(db, 'team:' + ip);
   return { status: 401, body: { error: 'That’s not it. Check the spelling and try again.', teamCode: true } };
@@ -365,9 +365,15 @@ async function keepVersion(db, eeid, version, text, by) {
 // A 4-digit PIN has only 10,000 values, so the hash's strength comes from PIN_PEPPER: without it,
 // a copy of the database alone isn't enough to work out anyone's PIN.
 async function hashPin(env, salt, pin) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.PIN_PEPPER),
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(await secret(env, 'PIN_PEPPER')),
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(salt + ':' + pin)));
+}
+// Secrets are bound from the account's Secrets Store (objects with an async get()), so a bad deploy can't
+// lose them the way it can a Worker version's own secrets. A plain Worker secret string still works too.
+async function secret(env, name) {
+  const s = env[name];
+  return s && typeof s.get === 'function' ? s.get() : s;
 }
 async function sha256(s) { return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))); }
 function hex(buf) { return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join(''); }
@@ -398,12 +404,13 @@ function cleanName(s) {
 async function lookup(q, env) {
   q = (q || '').trim().slice(0, 200);
   if (!q) return { results: [] };
-  if (!env.GOOGLE_API_KEY) throw new Error('Worker has no GOOGLE_API_KEY');
+  const apiKey = await secret(env, 'GOOGLE_API_KEY');
+  if (!apiKey) throw new Error('Worker has no GOOGLE_API_KEY');
   const g = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Goog-Api-Key': env.GOOGLE_API_KEY,
+      'X-Goog-Api-Key': apiKey,
       // Ask only for name + address to keep each lookup in the cheapest tier that includes addresses
       'X-Goog-FieldMask': 'places.displayName,places.formattedAddress',
     },

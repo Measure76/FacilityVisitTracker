@@ -1,5 +1,5 @@
 # Deploys automatically when main is pushed (Workers Builds). Manual fallback from this folder:  npx wrangler@4 deploy
-# Secrets (GOOGLE_API_KEY, TEAM_CODE, PIN_PEPPER) are set with `wrangler secret put` and never stored here.
+# Secrets live in the account's Secrets Store (see [[secrets_store_secrets]] below), not on the Worker itself.
 name = "facility-lookup"
 main = "worker.js"
 compatibility_date = "2025-09-01"
@@ -20,3 +20,23 @@ database_id = "ad1ec226-c72c-4850-9be5-3c221431edfd"
 type = "Text"
 globs = ["**/*.html"]
 fallthrough = true
+
+# Secrets come from the account's Secrets Store, so every deploy re-attaches the same values and a bad
+# build can't lose them. Values are set with:
+#   npx wrangler@4 secrets-store secret create 6b9bf51e3c3b47a7a1514fcf30f2bbcd --name <NAME> --scopes workers --remote
+# (or `secret update` with the secret's ID). Changing PIN_PEPPER invalidates every PIN; clear the PINs so
+# everyone chooses a new one at sign-in.
+[[secrets_store_secrets]]
+binding = "GOOGLE_API_KEY"
+store_id = "6b9bf51e3c3b47a7a1514fcf30f2bbcd"
+secret_name = "GOOGLE_API_KEY"
+
+[[secrets_store_secrets]]
+binding = "PIN_PEPPER"
+store_id = "6b9bf51e3c3b47a7a1514fcf30f2bbcd"
+secret_name = "PIN_PEPPER"
+
+[[secrets_store_secrets]]
+binding = "TEAM_CODE"
+store_id = "6b9bf51e3c3b47a7a1514fcf30f2bbcd"
+secret_name = "TEAM_CODE"
