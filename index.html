@@ -535,7 +535,7 @@ document.addEventListener('submit', async e => {
     btn.disabled = false;
   }
 });
-// mode: 'signin', 'signup' or 'reset' (the form name doubles as the server route)
+// mode: 'signin', 'signup', 'reset' or 'claim' (the form name doubles as the server route)
 function showSignIn(msg, mode){
   if(!readJson(TEAM_KEY)) return showGate();
   document.body.classList.remove('gate');
@@ -559,6 +559,10 @@ function showSignIn(msg, mode){
     reset: `<h2 style="margin-top:0">Choose a new PIN</h2>
       <p class="small muted">Enter the 6-digit code an admin gave you. It works once and expires after 24 hours.</p>${id}
       <label>Reset code<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
+      ${pin('New PIN', 'pin', 'new-password')}${pin('Confirm PIN', 'pin2', 'new-password')}
+      <button class="primary" type="submit">Set PIN and sign in</button>
+      <p class="small">${to('signin', 'Back to sign in')}</p>`,
+    claim: `<h2 style="margin-top:0">Choose a new PIN</h2>${id}
       ${pin('New PIN', 'pin', 'new-password')}${pin('Confirm PIN', 'pin2', 'new-password')}
       <button class="primary" type="submit">Set PIN and sign in</button>
       <p class="small">${to('signin', 'Back to sign in')}</p>`,
@@ -589,6 +593,7 @@ document.addEventListener('submit', async e => {
     if(!r.ok){
       if(out.teamCode && r.status===401){ try{ localStorage.removeItem(TEAM_KEY); }catch(e){} return showGate(); }   // the company name was changed on the server
       if(out.needCode) return showSignIn(out.error, 'reset');
+      if(out.choosePin) return showSignIn(out.error, 'claim');
       msg.textContent = out.error || ('Server problem (error '+r.status+')');
       return;
     }

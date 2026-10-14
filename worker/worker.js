@@ -15,11 +15,14 @@
 //                                 (add "null" temporarily to test from index.html opened straight from disk)
 //   DB               D1 binding   The database; tables are created automatically on first use
 //
-// Routes. Everything except team/signup/signin/reset needs header  Authorization: Bearer <session key>
+// Routes. Everything except team/signup/signin/reset/claim needs header  Authorization: Bearer <session key>
 //   POST /team     {teamCode}                   → {}        (401 if wrong; the first-visit company-name question)
 //   POST /signup   {eeid, name, pin, teamCode}  → {token}
-//   POST /signin   {eeid, pin}                  → {token}   (403 + {needCode} if an admin reset the PIN)
+//   POST /signin   {eeid, pin}                  → {token}   (403 + {needCode} if an admin reset the PIN,
+//                                                             403 + {choosePin} if the account has no PIN at all)
 //   POST /reset    {eeid, code, pin}            → {token}   (one-time code from an admin; sets a new PIN)
+//   POST /claim    {eeid, pin}                  → {token}   (sets the PIN on an account that has none and no reset
+//                                                             code waiting, e.g. after PIN_PEPPER is changed)
 //   POST /signout  {all}                        → {}        (all: true signs out every device)
 //   POST /pin      {pin, newPin}                → {}        (change PIN; signs out the other devices)
 //   GET  /data                                  → {eeid, name, admin, data, version}   (version 0: new account)
@@ -104,10 +107,10 @@ export default {
         return send({ token: await newSession(db, eeid) });
       }
 
-      if ((path === '/signin' || path === '/reset') && request.method === 'POST') {
-        const eeid = cleanId(body.eeid), pin = String(body.pin || ''), isReset = path === '/reset';
+      if ((path === '/signin' || path === '/reset' || path === '/claim') && request.method === 'POST') {
+        const eeid = cleanId(body.eeid), pin = String(body.pin || ''), isReset = path === '/reset', isClaim = path === '/claim';
         if (!eeid) return send({ error: 'Employee IDs are 9 digits.' }, 400);
-        if (!/^\d{4}$/.test(pin)) return send({ error: isReset ? 'Your new PIN must be 4 digits.' : 'PINs are 4 digits.' }, 400);
+        if (!/^\d{4}$/.test(pin)) return send({ error: isReset || isClaim ? 'Your new PIN must be 4 digits.' : 'PINs are 4 digits.' }, 400);
         const locked = await lockedFor(db, eeid, ip);
         if (locked) return send({ error: locked }, 429);
         const acc = await db.prepare('SELECT pin_hash, pin_salt, reset_hash, reset_expires FROM accounts WHERE eeid = ?').bind(eeid).first();
@@ -129,6 +132,18 @@ export default {
           ]);
           return send({ token: await newSession(db, eeid) });
         }
+        // No PIN and no reset code waiting: whoever signs in first chooses the PIN
+        const unclaimed = !acc.pin_hash && !acc.reset_hash;
+        if (isClaim) {
+          const taken = { error: 'That account already has a PIN. Sign in instead.' };
+          if (!unclaimed) return send(taken, 409);
+          const salt = randomHex(16);
+          const res = await db.prepare('UPDATE accounts SET pin_hash = ?, pin_salt = ? WHERE eeid = ? AND pin_hash IS NULL AND reset_hash IS NULL')
+            .bind(await hashPin(env, salt, pin), salt, eeid).run();
+          if (res.meta.changes !== 1) return send(taken, 409);
+          return send({ token: await newSession(db, eeid) });
+        }
+        if (unclaimed) return send({ error: 'Your account needs a new PIN. Choose one to sign in.', choosePin: true }, 403);
         if (!acc.pin_hash) return send({ error: 'Your PIN was reset. Enter the code your admin gave you.', needCode: true }, 403);
         if (!sameText(await hashPin(env, acc.pin_salt, pin), acc.pin_hash)) return send({ error: await wrong(db, eeid, ip, 'PIN') }, 401);
         await db.prepare('DELETE FROM attempts WHERE k = ?').bind('pin:' + eeid).run();
