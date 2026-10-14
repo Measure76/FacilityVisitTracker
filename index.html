@@ -148,6 +148,8 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
 .ev.team.sug{background:none;color:var(--muted)}   /* a tentative Travel Day */
 .stop{display:inline-block;min-width:14px;margin-right:4px;padding:0 3px;border-radius:7px;background:var(--accent);color:var(--accent-text);font-size:10px;font-weight:700;font-style:normal;line-height:14px;text-align:center}
+.ev.quick{background:none;border:1px solid var(--border);border-left:3px solid var(--accent);color:var(--muted)}
+.ev.done.quick{border-left-color:var(--green)}
 .ev.done .stop{background:var(--green)} .ev.sug .stop{background:var(--muted)}
 .side.over{outline:2px dashed var(--accent);outline-offset:-2px}
 .drop-hint{display:none;margin:0 0 10px;padding:10px;border:1px dashed var(--accent);border-radius:6px;color:var(--accent);font-size:13px;font-weight:600;text-align:center}
@@ -844,6 +846,23 @@ function reorder(id, ontoId, below){
   save();
   return true;
 }
+// Only the top facility on a day counts toward its rotation; the stops after it are quick
+// stops (a couple of tasks on the way), kept for mileage. Ancillary facilities aren't on a
+// rotation, so one on top doesn't take the slot. Gray entries count among themselves, so a
+// gray stop under a solid one still lets Fill plan around it.
+function rotationVisits(){
+  const top = {}, topAll = {};
+  db.visits.forEach(v => {
+    const f = v.facilityId && fac(v.facilityId);
+    if(!f || f.ancillary) return;
+    if(solid(v) && (!top[v.date] || dayOrder(v, top[v.date]) < 0)) top[v.date] = v;
+    if(!topAll[v.date] || dayOrder(v, topAll[v.date]) < 0) topAll[v.date] = v;
+  });
+  const out = new Set(Object.values(top));
+  Object.values(topAll).forEach(v => { if(v.tentative) out.add(v); });
+  return out;
+}
+const isQuickStop = (v, rot) => !!v.facilityId && !(fac(v.facilityId)||{}).ancillary && !(rot || rotationVisits()).has(v);
 // A visit's stop number on its day, or 0 when it's the only one. The calendar counts gray
 // entries too; the log and CSV count only real visits.
 function stopOf(v, withGray){
@@ -883,10 +902,10 @@ function suggestSchedule(from, to){   // to is exclusive; returns {date: {f, due
   const trips = (db.trips||[]).filter(validTrip);
   const inTrip = new Set();
   trips.forEach(t => t.days.forEach(x => x.fid && inTrip.add(x.fid)));
-  // next due date per facility; a booking counts as a visit
-  const dueOf = {};
+  // next due date per facility; a booking counts as a visit, a quick stop doesn't
+  const dueOf = {}, rot = rotationVisits();
   db.facilities.forEach(f => {
-    const dates = db.visits.filter(v => v.facilityId===f.id).map(v => v.date).sort();
+    const dates = db.visits.filter(v => v.facilityId===f.id && rot.has(v)).map(v => v.date).sort();
     const weeks = typeInfo(f.type).weeks;
     dueOf[f.id] = {weeks, due: dates.length ? addDays(dates[dates.length-1], weeks*7) : today()};
   });
@@ -1000,7 +1019,7 @@ function download(name, text, type){
 // ---------- overdue logic ----------
 function facilityStatus(f){
   const t = today();
-  const mine = db.visits.filter(v => v.facilityId===f.id);
+  const rot = rotationVisits(), mine = db.visits.filter(v => v.facilityId===f.id && rot.has(v));
   const done = mine.filter(v => solid(v) && v.date<=t).map(v => v.date).sort();
   const planned = mine.filter(v => v.date>t).map(v => v.date).sort();
   const info = typeInfo(f.type);
@@ -1068,7 +1087,7 @@ function visitRow(v, opts){
   const done = isDone(v);
   return `<div class="item ${done&&!opts.log?'done':''}">
     <span class="date">${whenText(v)}</span>
-    <span class="what">${done&&!opts.log?'✓ ':''}${opts.log&&stopOf(v)?`<span class="stop">${stopOf(v)}</span>`:''}${esc(visitLabel(v))}
+    <span class="what">${done&&!opts.log?'✓ ':''}${opts.log&&stopOf(v)?`<span class="stop">${stopOf(v)}</span>`:''}${esc(visitLabel(v))}${opts.log&&isQuickStop(v)?' <span class="badge gray" title="Not the top facility that day, so it doesn’t count toward its rotation">Quick stop</span>':''}
       ${f&&f.type==='remote'?' <span class="badge fly">Fly</span>':''}${!v.facilityId?' <span class="badge gray">Other</span>':''}
       ${opts.log&&f&&f.address?`<div class="muted small">${esc(f.address)}</div>`:''}
       ${v.notes?`<div class="muted small">${esc(v.notes)}</div>`:''}</span>
@@ -1121,7 +1140,8 @@ function renderSchedule(){
   const sug = visibleSuggestions(), sugFor = {};
   const tripSug = {};
   Object.keys(sug).sort().forEach(d => { const x = sug[d]; if(x.f && !sugFor[x.f.id]) sugFor[x.f.id] = d; if(x.trip && !tripSug[x.trip.id]) tripSug[x.trip.id] = x.start; });
-  const nextDue = st => { const ds = db.visits.filter(v => v.facilityId===st.f.id).map(v => v.date).sort();
+  const rot = rotationVisits();
+  const nextDue = st => { const ds = db.visits.filter(v => v.facilityId===st.f.id && rot.has(v)).map(v => v.date).sort();
     return ds.length ? addDays(ds[ds.length-1], st.info.weeks*7) : ''; };
   const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || nextDue(a).localeCompare(nextDue(b)) || a.f.name.localeCompare(b.f.name));
   const chips = byLast.map(st => {
@@ -1141,7 +1161,7 @@ function renderSchedule(){
     <h3>Drag onto a day</h3>
     <div class="palette">${chips}</div>
     <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
-      : 'Drag onto a day, or tap and then tap a day. Anything placed by hand is locked to its day; drag it back over here to clear the day. Several facilities can share a day: drag them up or down to set the order you drive them in. <b>Fill next 4 weeks</b> adds <i>gray dashed tentative entries</i>: click one to lock it. Click a solid entry to edit it.'}</p>
+      : 'Drag onto a day, or tap and then tap a day. Anything placed by hand is locked to its day; drag it back over here to clear the day. Several facilities can share a day: drag them up or down to set the order you drive them in. Only the top one counts toward its rotation; the rest are quick stops. <b>Fill next 4 weeks</b> adds <i>gray dashed tentative entries</i>: click one to lock it. Click a solid entry to edit it.'}</p>
   </aside>`;
 
   // Calendar
@@ -1171,7 +1191,7 @@ function renderSchedule(){
           : `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
       }).join('');
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
-        const f = fac(v.facilityId), fly = f&&f.type==='remote'?' ✈':'', n = stopOf(v, true);
+        const f = fac(v.facilityId), fly = f&&f.type==='remote'?' ✈':'', n = stopOf(v, true), quick = isQuickStop(v, rot);
         const stop = n ? `<span class="stop" title="Stop ${n}">${n}</span>` : '';
         if(v.tentative){
           const trip = v.tripId && tripById(v.tripId), due = f && facilityStatus(f).due;
@@ -1179,8 +1199,8 @@ function renderSchedule(){
             title="Tentative: ${esc(visitLabel(v))}${due ? ' is due '+fmt(due) : ''}.${trip ? ' On '+esc(trip.name)+'. Click to lock the whole trip.' : ' Click to lock it.'}">${stop}${esc(visitLabel(v))}${fly}</button>`;
         }
         const done = d<=t;
-        return `<button class="ev${done?' done':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
-          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}${n?' · stop '+n+'. Drag up or down to change the order.':''}">${n ? stop : done?'✓ ':''}${esc(visitLabel(v))}${fly}</button>`;
+        return `<button class="ev${done?' done':''}${quick?' quick':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
+          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}${n?' · stop '+n+'. Drag up or down to change the order.':''}${quick?' Quick stop: only the top facility on a day counts toward its rotation; drag it to the top to make it the visit.':''}">${n ? stop : done?'✓ ':''}${esc(visitLabel(v))}${fly}</button>`;
       }).join('');
       const cd = concurDue(d.slice(0,7));
       const concur = cd.date!==d ? '' : cd.unverified
@@ -1266,7 +1286,7 @@ async function dropOn(date, item){
   const nv = {id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false, order:nextOrder(date)};
   db.visits.push(nv);
   if(item.at) placeBy(nv, item.at.id, item.at.below);
-  save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date)+(stopOf(nv) ? ', stop '+stopOf(nv) : ''));
+  save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date)+(stopOf(nv) ? ', stop '+stopOf(nv) : '')+(isQuickStop(nv) ? '. Quick stop: only the top facility on a day counts toward its rotation.' : ''));
 }
 function setPlacing(p){
   placing = p;
@@ -1440,7 +1460,7 @@ function renderTutorial(){
         <li>Tap <b>This month</b> and drag facilities onto the days you plan to visit. The list is sorted soonest due first.</li>
         <li>Tap <b>Fill next 4 weeks</b> to fill the open days with gray dashed tentative entries, soonest due first. Tap one that makes sense to lock it. Tentative entries aren't in the email, and they disappear once their day passes.</li>
         <li>Add team meetings, PTO, Bank Days and Travel Days with the buttons above the calendar. Drag anything on the calendar to move it.</li>
-        <li>Visiting more than one facility in a day? Drop them all on that day, then drag them up or down into the order you'll drive them. The numbers carry through to the Visit log and CSV for Concur mileage.</li>
+        <li>Visiting more than one facility in a day? Drop them all on that day, then drag them up or down into the order you'll drive them. The numbers carry through to the Visit log and CSV for Concur mileage. Only the top facility on a day counts as its rotation visit; the others are quick stops, logged for mileage but not resetting their due dates.</li>
         <li>Anything you drag onto a day is locked there (solid). To clear a day, drag its entry back onto the facility list. If plans change, tap <b>Fill next 4 weeks</b> again: it redoes the gray entries around the solid ones.</li>
       </ul>
       ${go('schedule', 'Schedule')}
