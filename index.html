@@ -147,6 +147,8 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .ev.sug{background:none;border:1px dashed var(--border);border-left:1px dashed var(--border);color:var(--muted);font-style:italic}
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
 .ev.team.sug{background:none;color:var(--muted)}   /* a tentative Travel Day */
+.stop{display:inline-block;min-width:14px;margin-right:4px;padding:0 3px;border-radius:7px;background:var(--accent);color:var(--accent-text);font-size:10px;font-weight:700;font-style:normal;line-height:14px;text-align:center}
+.ev.done .stop{background:var(--green)} .ev.sug .stop{background:var(--muted)}
 .side.over{outline:2px dashed var(--accent);outline-offset:-2px}
 .drop-hint{display:none;margin:0 0 10px;padding:10px;border:1px dashed var(--accent);border-radius:6px;color:var(--accent);font-size:13px;font-weight:600;text-align:center}
 body.dragging-visit .drop-hint{display:block}
@@ -826,14 +828,27 @@ const dayOrder = (a,b) => (a.order||0)-(b.order||0) || visitLabel(a).localeCompa
 const dayVisits = d => db.visits.filter(v => v.facilityId && v.date===d).sort(dayOrder);
 const nextOrder = d => dayVisits(d).reduce((m, v) => Math.max(m, (v.order||0)+1), 0);
 // Dropping a visit onto another visit on the same day puts it above (or below) that one
-function reorder(id, ontoId, below){
-  const v = db.visits.find(x => x.id===id), o = db.visits.find(x => x.id===ontoId);
-  if(!v || !o || !v.facilityId || !o.facilityId || v.date!==o.date) return false;
+// (the order you drive them in, which Concur's mileage follows)
+function placeBy(v, ontoId, below){
+  const o = db.visits.find(x => x.id===ontoId);
+  if(!v || !o || !v.facilityId || !o.facilityId || v===o || v.date!==o.date) return false;
   const list = dayVisits(v.date).filter(x => x!==v);
   list.splice(list.indexOf(o) + (below?1:0), 0, v);
   list.forEach((x, i) => { x.order = i; });
+  return true;
+}
+function reorder(id, ontoId, below){
+  const v = db.visits.find(x => x.id===id);
+  if(!placeBy(v, ontoId, below)) return false;
+  lockTentative(v);   // moved by hand, so it stays
   save();
   return true;
+}
+// A visit's stop number on its day, or 0 when it's the only one. The calendar counts gray
+// entries too; the log and CSV count only real visits.
+function stopOf(v, withGray){
+  const day = dayVisits(v.date).filter(x => withGray || solid(x));
+  return day.length > 1 ? day.indexOf(v) + 1 : 0;
 }
 // Tentative entries come only from Fill. From tomorrow on, Fill may replace them; once their
 // day passes they vanish, so only solid entries are ever counted as visits.
@@ -1053,7 +1068,7 @@ function visitRow(v, opts){
   const done = isDone(v);
   return `<div class="item ${done&&!opts.log?'done':''}">
     <span class="date">${whenText(v)}</span>
-    <span class="what">${done&&!opts.log?'✓ ':''}${esc(visitLabel(v))}
+    <span class="what">${done&&!opts.log?'✓ ':''}${opts.log&&stopOf(v)?`<span class="stop">${stopOf(v)}</span>`:''}${esc(visitLabel(v))}
       ${f&&f.type==='remote'?' <span class="badge fly">Fly</span>':''}${!v.facilityId?' <span class="badge gray">Other</span>':''}
       ${opts.log&&f&&f.address?`<div class="muted small">${esc(f.address)}</div>`:''}
       ${v.notes?`<div class="muted small">${esc(v.notes)}</div>`:''}</span>
@@ -1126,7 +1141,7 @@ function renderSchedule(){
     <h3>Drag onto a day</h3>
     <div class="palette">${chips}</div>
     <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
-      : 'Drag onto a day, or tap and then tap a day. Anything placed by hand is locked to its day; drag it back over here to clear the day. <b>Fill next 4 weeks</b> adds <i>gray dashed tentative entries</i>: click one to lock it. Click a solid entry to edit it.'}</p>
+      : 'Drag onto a day, or tap and then tap a day. Anything placed by hand is locked to its day; drag it back over here to clear the day. Several facilities can share a day: drag them up or down to set the order you drive them in. <b>Fill next 4 weeks</b> adds <i>gray dashed tentative entries</i>: click one to lock it. Click a solid entry to edit it.'}</p>
   </aside>`;
 
   // Calendar
@@ -1156,15 +1171,16 @@ function renderSchedule(){
           : `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
       }).join('');
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
-        const f = fac(v.facilityId), fly = f&&f.type==='remote'?' ✈':'';
+        const f = fac(v.facilityId), fly = f&&f.type==='remote'?' ✈':'', n = stopOf(v, true);
+        const stop = n ? `<span class="stop" title="Stop ${n}">${n}</span>` : '';
         if(v.tentative){
           const trip = v.tripId && tripById(v.tripId), due = f && facilityStatus(f).due;
           return `<button class="ev sug" draggable="true" data-drag="visit" data-id="${v.id}" data-act="lock"
-            title="Tentative: ${esc(visitLabel(v))}${due ? ' is due '+fmt(due) : ''}.${trip ? ' On '+esc(trip.name)+'. Click to lock the whole trip.' : ' Click to lock it.'}">${esc(visitLabel(v))}${fly}</button>`;
+            title="Tentative: ${esc(visitLabel(v))}${due ? ' is due '+fmt(due) : ''}.${trip ? ' On '+esc(trip.name)+'. Click to lock the whole trip.' : ' Click to lock it.'}">${stop}${esc(visitLabel(v))}${fly}</button>`;
         }
         const done = d<=t;
         return `<button class="ev${done?' done':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit"
-          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}">${done?'✓ ':''}${esc(visitLabel(v))}${fly}</button>`;
+          title="${esc(visitLabel(v))}${done?' · completed':' · planned'}${n?' · stop '+n+'. Drag up or down to change the order.':''}">${n ? stop : done?'✓ ':''}${esc(visitLabel(v))}${fly}</button>`;
       }).join('');
       const cd = concurDue(d.slice(0,7));
       const concur = cd.date!==d ? '' : cd.unverified
@@ -1224,6 +1240,7 @@ async function dropOn(date, item){
       v.order = nextOrder(date);   // joins the bottom of its new day
       v.date = date;
       delete v.tripId; delete v.tripStart; delete v.tentative;   // placed by hand, so locked
+      if(item.at) placeBy(v, item.at.id, item.at.below);
     }else{
       const len = daysBetween(v.date, endOf(v));
       const moved = Object.assign({}, v, {date, endDate: v.endDate ? addDays(date, len) : ''});
@@ -1246,8 +1263,10 @@ async function dropOn(date, item){
   const why = dayProblem(date);
   if(why && !await ask(fmtDay(date)+' '+why+'.', {title:'Book '+f.name+'?', yes:'Book anyway'})) return;
   const past = date < today();
-  db.visits.push({id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false, order:nextOrder(date)});
-  save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date));
+  const nv = {id:uid(), facilityId:f.id, date, status:statusByDate(date), notes:'', label:'', endDate:'', concur:false, order:nextOrder(date)};
+  db.visits.push(nv);
+  if(item.at) placeBy(nv, item.at.id, item.at.below);
+  save(); toast((past?'Recorded ':'Booked ')+f.name+' on '+fmtDay(date)+(stopOf(nv) ? ', stop '+stopOf(nv) : ''));
 }
 function setPlacing(p){
   placing = p;
@@ -1305,9 +1324,11 @@ document.addEventListener('drop', e => {
   let item; try{ item = JSON.parse(e.dataTransfer.getData('text/plain')); }catch(x){ return; }
   if(placing) setPlacing(null);
   const onto = e.target.closest('.ev[data-id]');
-  if(item.kind==='visit' && onto && onto.dataset.id!==item.id) {
-    const box = onto.getBoundingClientRect();
-    if(reorder(item.id, onto.dataset.id, e.clientY > box.top + box.height/2)) return;
+  // Dropped onto a facility visit: that's where it goes in the day's order
+  if((item.kind==='visit' || item.kind==='fac') && onto && onto.dataset.id!==item.id) {
+    const box = onto.getBoundingClientRect(), below = e.clientY > box.top + box.height/2;
+    if(item.kind==='visit' && reorder(item.id, onto.dataset.id, below)) return;
+    item.at = {id:onto.dataset.id, below};
   }
   dropOn(day.dataset.date, item);
 });
@@ -1324,7 +1345,7 @@ function logRange(){
 }
 function logVisits(r){
   return db.visits.filter(v => v.facilityId && solid(v) && isDone(v) && v.date>=r.from && v.date<=r.to && (!r.open || !v.concur))
-    .sort((a,b)=>a.date.localeCompare(b.date));
+    .sort((a,b)=>a.date.localeCompare(b.date) || dayOrder(a,b));
 }
 function renderLog(){
   const r = logRange();
@@ -1419,6 +1440,7 @@ function renderTutorial(){
         <li>Tap <b>This month</b> and drag facilities onto the days you plan to visit. The list is sorted soonest due first.</li>
         <li>Tap <b>Fill next 4 weeks</b> to fill the open days with gray dashed tentative entries, soonest due first. Tap one that makes sense to lock it. Tentative entries aren't in the email, and they disappear once their day passes.</li>
         <li>Add team meetings, PTO, Bank Days and Travel Days with the buttons above the calendar. Drag anything on the calendar to move it.</li>
+        <li>Visiting more than one facility in a day? Drop them all on that day, then drag them up or down into the order you'll drive them. The numbers carry through to the Visit log and CSV for Concur mileage.</li>
         <li>Anything you drag onto a day is locked there (solid). To clear a day, drag its entry back onto the facility list. If plans change, tap <b>Fill next 4 weeks</b> again: it redoes the gray entries around the solid ones.</li>
       </ul>
       ${go('schedule', 'Schedule')}
@@ -1539,10 +1561,10 @@ function icsFile(){
 }
 const csvCell = x => { x = String(x==null?'':x); return /[",\n]/.test(x) ? '"'+x.replace(/"/g,'""')+'"' : x; };
 function csvFile(){
-  const rows = [['Date','Facility','Address','Type','Notes','Entered in Concur']];
+  const rows = [['Date','Stop','Facility','Address','Type','Notes','Entered in Concur']];
   logVisits(logRange()).forEach(v => {
     const f = fac(v.facilityId);
-    rows.push([v.date, visitLabel(v), f?f.address:'', f?typeInfo(f.type).short:'', v.notes, v.concur?'Yes':'No']);
+    rows.push([v.date, stopOf(v)||1, visitLabel(v), f?f.address:'', f?typeInfo(f.type).short:'', v.notes, v.concur?'Yes':'No']);
   });
   return rows.map(r => r.map(csvCell).join(',')).join('\r\n');
 }
