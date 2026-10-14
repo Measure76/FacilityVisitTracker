@@ -6,8 +6,9 @@ compatibility_date = "2025-09-01"
 workers_dev = true
 preview_urls = false
 
-# ALLOWED_ORIGINS was set in the Cloudflare dashboard; keep it rather than wipe it on deploy
-keep_vars = true
+[vars]
+# Pages other than the Worker's own that may call it (the GitHub Pages copy)
+ALLOWED_ORIGINS = "https://measure76.github.io"
 
 [[d1_databases]]
 binding = "DB"
