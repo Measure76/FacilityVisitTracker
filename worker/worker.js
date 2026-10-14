@@ -172,7 +172,7 @@ export default {
         const text = JSON.stringify(body.data);
         if (text.length > MAX_DATA_BYTES) return send({ error: 'Data too large' }, 413);
         // Optimistic concurrency: only write if nobody else saved since this device last loaded.
-        const res = await db.prepare('UPDATE accounts SET data = ?, version = version + 1, updated_at = ? WHERE eeid = ? AND version = ?')
+        const res = await db.prepare('UPDATE accounts SET data = ?, version = version + 1, updated_at = ?2, last_seen = ?2 WHERE eeid = ?3 AND version = ?4')
           .bind(text, iso(), me.eeid, body.baseVersion).run();
         if (res.meta.changes === 1) {
           await keepVersion(db, me.eeid, body.baseVersion + 1, text, me.eeid);
@@ -272,9 +272,12 @@ async function ensureSchema(db) {
 
 // ---------- sessions ----------
 async function newSession(db, eeid) {
-  const token = randomHex(32);
-  await db.prepare('INSERT INTO sessions (token_hash, eeid, created_at, last_used) VALUES (?, ?, ?, ?)')
-    .bind(await sha256(token), eeid, iso(), Date.now()).run();
+  const token = randomHex(32), now = iso();
+  await db.batch([
+    db.prepare('INSERT INTO sessions (token_hash, eeid, created_at, last_used) VALUES (?, ?, ?, ?)')
+      .bind(await sha256(token), eeid, now, Date.now()),
+    db.prepare('UPDATE accounts SET last_seen = ? WHERE eeid = ?').bind(now, eeid),
+  ]);
   return token;
 }
 async function sessionFor(request, db) {
