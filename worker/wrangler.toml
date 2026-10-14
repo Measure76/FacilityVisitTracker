@@ -1,5 +1,5 @@
-# Deploy from this folder with:  npx wrangler@4 deploy
-# Secrets (GOOGLE_API_KEY, TEAM_PASSCODE) are set with `wrangler secret put` and never stored here.
+# Deploys automatically when main is pushed (Workers Builds). Manual fallback from this folder:  npx wrangler@4 deploy
+# Secrets (GOOGLE_API_KEY, TEAM_CODE, PIN_PEPPER) are set with `wrangler secret put` and never stored here.
 name = "facility-lookup"
 main = "worker.js"
 compatibility_date = "2025-09-01"
