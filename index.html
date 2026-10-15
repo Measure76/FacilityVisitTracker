@@ -308,6 +308,14 @@ body.dragging-visit .drop-hint{display:block}
   </div>
 </dialog>
 
+<dialog id="phoneDlg">
+  <h2>Phone calendar</h2>
+  <div id="phoneBody"></div>
+  <div class="dlg-actions" style="margin-top:12px"><span class="grow"></span>
+    <button type="button" data-act="close">Close</button>
+  </div>
+</dialog>
+
 <input type="file" id="importFile" accept=".json,application/json" hidden>
 <div id="toast"></div>
 
@@ -1137,6 +1145,7 @@ function renderSchedule(){
     ${grayInEmail() ? `<span class="small muted">${grayText(grayInEmail())}</span>` : ''}
     <button data-act="email-text">Copy for email</button>
     <button data-act="ics">Download calendar (.ics)</button>
+    <button data-act="phone-cal" title="Show your booked entries in your phone's calendar app, kept up to date">Phone calendar</button>
   </div>`;
 
 
@@ -1808,6 +1817,185 @@ async function copy(text){
   catch(e){ toast('Select the text and press Ctrl+C'); }
 }
 
+// ---------- phone calendar ----------
+// A private link the Worker serves as a calendar feed (see /cal in worker.js). A phone subscribes
+// once and its calendar app picks up saved changes by itself. The QR code uses webcal://, which
+// an iPhone opens straight into Calendar's Subscribe screen.
+const phoneCal = {token:null, lastFetched:null, loading:false, error:''};
+const feedUrl = t => SERVER_URL + '/cal/' + t + '.ics';
+async function openPhoneCal(){
+  Object.assign(phoneCal, {loading:true, error:''});
+  renderPhoneCal();
+  document.getElementById('phoneDlg').showModal();
+  try{
+    const r = await api('/feed');
+    if(!r.ok) throw new Error(await errorText(r));
+    Object.assign(phoneCal, await r.json());
+  }catch(e){ phoneCal.error = e.message; }
+  phoneCal.loading = false;
+  renderPhoneCal();
+}
+async function phoneFeed(what){
+  phoneCal.loading = true; renderPhoneCal();
+  try{
+    const r = await post('/feed', what==='off' ? {off:true} : {});
+    if(!r.ok) throw new Error(await errorText(r));
+    Object.assign(phoneCal, what==='off' ? {token:null} : (await r.json()), {lastFetched:null, error:''});
+  }catch(e){ phoneCal.error = e.message; }
+  phoneCal.loading = false;
+  renderPhoneCal();
+}
+function renderPhoneCal(){
+  const c = phoneCal, el = document.getElementById('phoneBody');
+  const err = c.error ? `<p class="warn small">${esc(c.error)}</p>` : '';
+  if(c.loading){ el.innerHTML = '<p class="muted">Loading…</p>'; return; }
+  if(!c.token){
+    el.innerHTML = err + `<p>Put your booked entries in your phone’s own calendar app. It keeps itself up to date, and works without signal once it has synced.</p>
+      <p class="small muted">Gray suggestions stay off until you lock them. Bank Days show as PTO, without their notes.</p>
+      <div class="row"><button class="primary" data-act="feed-new">Set up phone calendar</button></div>`;
+    return;
+  }
+  const url = feedUrl(c.token);
+  el.innerHTML = err + `<div style="max-width:240px;margin:0 auto 10px">${qrSvg(url.replace(/^https:/, 'webcal:'))}</div>
+    <p class="small"><b>iPhone:</b> scan this with the Camera app, tap the link, then <b>Subscribe</b>.<br>
+      <b>Google Calendar:</b> on a computer, open calendar.google.com, then <b>Other calendars +</b> › <b>From URL</b> and paste the link.<br>
+      <b>Outlook:</b> in Outlook on the web, <b>Add calendar</b> › <b>Subscribe from web</b> and paste the link.</p>
+    <label>Link<input readonly value="${esc(url)}" onfocus="this.select()"></label>
+    <p class="small muted">${c.lastFetched ? 'A calendar last checked for changes '+esc(new Date(c.lastFetched).toLocaleString([], {dateStyle:'medium', timeStyle:'short'})) : 'No calendar has used this link yet'}.
+      Phones check on their own schedule, usually within an hour or so; Google can take up to a day.
+      Anyone with the link can see your schedule, so make a new one if it gets shared by mistake.</p>
+    <div class="row">
+      <button class="primary" data-act="feed-copy">Copy link</button>
+      <span class="grow"></span>
+      <button data-act="feed-new" data-replace="1">New link</button>
+      <button class="danger" data-act="feed-off">Turn off</button>
+    </div>`;
+}
+
+// ---------- QR code ----------
+// Byte mode, error correction M, versions 1–10 (up to 213 bytes); plenty for a link.
+// Returns rows of true (dark) / false.
+const QR_M = [null,[10,1,16,0,0],[16,1,28,0,0],[26,1,44,0,0],[18,2,32,0,0],[24,2,43,0,0],
+  [16,4,27,0,0],[18,4,31,0,0],[22,2,38,2,39],[22,3,36,2,37],[26,4,43,1,44]];   // [EC per block, blocks, data each, blocks, data each]
+const QR_ALIGN = [null,[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50]];
+function qrMatrix(text){
+  const bytes = Array.from(new TextEncoder().encode(text));
+  const cap = v => QR_M[v][1]*QR_M[v][2] + QR_M[v][3]*QR_M[v][4];
+  let ver = 1;
+  while(ver <= 10 && 4 + (ver<10?8:16) + bytes.length*8 > cap(ver)*8) ver++;
+  if(ver > 10) throw new Error('Too long for a QR code');
+  const [ecLen, n1, d1, n2, d2] = QR_M[ver], dataLen = cap(ver), size = 17 + 4*ver;
+
+  // Data codewords: mode, length, bytes, terminator, pad
+  const bits = [], put = (val, n) => { for(let i=n-1; i>=0; i--) bits.push((val>>>i)&1); };
+  put(4, 4); put(bytes.length, ver<10?8:16); bytes.forEach(b => put(b, 8));
+  put(0, Math.min(4, dataLen*8 - bits.length));
+  while(bits.length % 8) bits.push(0);
+  const data = [];
+  for(let i=0; i<bits.length; i+=8) data.push(parseInt(bits.slice(i, i+8).join(''), 2));
+  for(let p=0; data.length<dataLen; p^=1) data.push(p ? 0x11 : 0xEC);
+
+  // Reed–Solomon error correction per block, then interleave
+  const exp = [], log = [];
+  for(let i=0, x=1; i<255; i++){ exp[i] = x; log[x] = i; x <<= 1; if(x & 256) x ^= 0x11d; }
+  const mul = (a, b) => a && b ? exp[(log[a]+log[b]) % 255] : 0;
+  let gen = [1];
+  for(let i=0; i<ecLen; i++){ const g = gen.concat(0); gen.forEach((c, j) => { g[j+1] ^= mul(c, exp[i]); }); gen = g; }
+  const blocks = [];
+  for(let b=0, at=0; b<n1+n2; b++){ const n = b<n1 ? d1 : d2; blocks.push(data.slice(at, at+n)); at += n; }
+  const ecs = blocks.map(blk => {
+    const r = new Array(ecLen).fill(0);
+    blk.forEach(d => { const f = d ^ r.shift(); r.push(0); for(let j=0; j<ecLen; j++) r[j] ^= mul(gen[j+1], f); });
+    return r;
+  });
+  const words = [];
+  for(let i=0; i<Math.max(d1, d2); i++) blocks.forEach(blk => { if(i < blk.length) words.push(blk[i]); });
+  for(let i=0; i<ecLen; i++) ecs.forEach(ec => words.push(ec[i]));
+
+  // Function patterns
+  const m = [], fn = [];
+  for(let y=0; y<size; y++){ m.push(new Array(size).fill(false)); fn.push(new Array(size).fill(false)); }
+  const set = (x, y, dark) => { m[y][x] = dark; fn[y][x] = true; };
+  [[0,0],[size-7,0],[0,size-7]].forEach(([fx, fy]) => {
+    for(let dy=-1; dy<=7; dy++) for(let dx=-1; dx<=7; dx++){
+      const x = fx+dx, y = fy+dy;
+      if(x<0 || y<0 || x>=size || y>=size) continue;
+      const ring = Math.max(Math.abs(dx-3), Math.abs(dy-3));   // 0–1 centre, 2 white, 3 black, 4 separator
+      set(x, y, ring!==2 && ring!==4);
+    }
+  });
+  for(let i=8; i<size-8; i++){ set(i, 6, i%2===0); set(6, i, i%2===0); }
+  const al = QR_ALIGN[ver], last = al.length-1;
+  al.forEach((ay, i) => al.forEach((ax, j) => {
+    if((i===0 && j===0) || (i===0 && j===last) || (i===last && j===0)) return;
+    for(let dy=-2; dy<=2; dy++) for(let dx=-2; dx<=2; dx++) set(ax+dx, ay+dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+  }));
+  const drawFormat = mask => {
+    let rem = mask;   // level M is 00
+    for(let i=0; i<10; i++) rem = (rem<<1) ^ ((rem>>>9) * 0x537);
+    const f = ((mask<<10) | rem) ^ 0x5412, bit = i => ((f>>>i) & 1) === 1;
+    for(let i=0; i<=5; i++) set(8, i, bit(i));
+    set(8, 7, bit(6)); set(8, 8, bit(7)); set(7, 8, bit(8));
+    for(let i=9; i<15; i++) set(14-i, 8, bit(i));
+    for(let i=0; i<8; i++) set(size-1-i, 8, bit(i));
+    for(let i=8; i<15; i++) set(8, size-15+i, bit(i));
+    set(8, size-8, true);
+  };
+  drawFormat(0);   // reserve its modules before placing data
+  if(ver >= 7){
+    let rem = ver;
+    for(let i=0; i<12; i++) rem = (rem<<1) ^ ((rem>>>11) * 0x1f25);
+    const v = (ver<<12) | rem;
+    for(let i=0; i<18; i++){ const d = ((v>>>i) & 1) === 1, a = size-11 + i%3, b = Math.floor(i/3); set(a, b, d); set(b, a, d); }
+  }
+
+  // Data in the two-column zigzag, right to left, skipping the timing column
+  let k = 0;
+  for(let right=size-1; right>=1; right-=2){
+    if(right===6) right = 5;
+    for(let vert=0; vert<size; vert++) for(let j=0; j<2; j++){
+      const x = right-j, y = ((right+1) & 2)===0 ? size-1-vert : vert;
+      if(!fn[y][x] && k < words.length*8){ m[y][x] = ((words[k>>>3] >>> (7-(k&7))) & 1) === 1; k++; }
+    }
+  }
+
+  // Try the eight masks and keep the one with the fewest scanner-confusing patterns
+  const MASKS = [(x,y)=>(x+y)%2===0, (x,y)=>y%2===0, (x,y)=>x%3===0, (x,y)=>(x+y)%3===0,
+    (x,y)=>(Math.floor(y/2)+Math.floor(x/3))%2===0, (x,y)=>x*y%2+x*y%3===0,
+    (x,y)=>(x*y%2+x*y%3)%2===0, (x,y)=>((x+y)%2+x*y%3)%2===0];
+  const apply = mask => { for(let y=0; y<size; y++) for(let x=0; x<size; x++) if(!fn[y][x] && MASKS[mask](x, y)) m[y][x] = !m[y][x]; };
+  const penalty = () => {
+    let p = 0, dark = 0;
+    const lines = [];
+    for(let i=0; i<size; i++){ lines.push(m[i].map(Number).join('')); lines.push(m.map(r => Number(r[i])).join('')); }
+    lines.forEach(s => {
+      (s.match(/0{5,}|1{5,}/g) || []).forEach(run => { p += run.length - 2; });
+      p += 40 * (s.match(/(?=10111010000|00001011101)/g) || []).length;
+    });
+    for(let y=0; y<size; y++) for(let x=0; x<size; x++){
+      if(m[y][x]) dark++;
+      if(x<size-1 && y<size-1 && m[y][x]===m[y][x+1] && m[y][x]===m[y+1][x] && m[y][x]===m[y+1][x+1]) p += 3;
+    }
+    return p + 10 * Math.floor(Math.abs(dark*20 - size*size*10) / (size*size));
+  };
+  let best = 0, bestScore = Infinity;
+  for(let mask=0; mask<8; mask++){
+    apply(mask); drawFormat(mask);
+    const s = penalty();
+    if(s < bestScore){ best = mask; bestScore = s; }
+    apply(mask);   // undo
+  }
+  apply(best); drawFormat(best);
+  return m;
+}
+// An SVG of the code with the standard four-module quiet zone, black on white whatever the theme
+function qrSvg(text){
+  const m = qrMatrix(text), n = m.length + 8;
+  let d = '';
+  m.forEach((row, y) => row.forEach((dark, x) => { if(dark) d += `M${x+4} ${y+4}h1v1h-1z`; }));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="100%" shape-rendering="crispEdges" role="img" aria-label="QR code for the calendar link"><rect width="${n}" height="${n}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
 // ---------- events ----------
 document.addEventListener('click', async e => {
   // Tap-to-place: after tapping a palette button, the next tap on a day places it
@@ -1884,6 +2072,14 @@ document.addEventListener('click', async e => {
     case 'email-text': showText('Schedule for email', emailText(), emailWarning()); break;
     case 'copy-text': copy(document.getElementById('textOut').value); break;
     case 'ics': download('visit-schedule.ics', icsFile(), 'text/calendar'); break;
+    case 'phone-cal': openPhoneCal(); break;
+    case 'feed-new':
+      if(b.dataset.replace && !await ask('The current link stops working. Any phone using it has to add the new one.', {title:'Make a new link?', yes:'Make a new link', danger:true})) break;
+      phoneFeed('make'); break;
+    case 'feed-off':
+      if(await ask('Your phone’s calendar stops updating, and the link stops working.', {title:'Turn off the phone calendar?', yes:'Turn off', danger:true})) phoneFeed('off');
+      break;
+    case 'feed-copy': copy(feedUrl(phoneCal.token)); break;
     case 'csv': { const r = logRange(); download(`visits_${r.from}_to_${r.to}.csv`, csvFile(), 'text/csv'); break; }
     case 'export':
       download(`facility-visits-${today()}.json`, JSON.stringify(db, null, 2), 'application/json'); break;

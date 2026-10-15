@@ -35,6 +35,10 @@
 //   POST /admin/role     {eeid, admin}          → {}
 //   GET  /admin/history?eeid=ID                 → {versions:[{version, savedAt, by, bytes}]}
 //   POST /admin/restore  {eeid, version}        → {version}
+//   GET  /feed                                  → {token, lastFetched}   (token null: no phone calendar link)
+//   POST /feed     {off}                        → {token}   (a new link, replacing any old one; off: true removes it)
+//   No sign-in, for calendar apps:
+//   GET  /cal/<token>.ics                       → the person's booked entries as a calendar feed
 //   GET  /                                      → the app (index.html, bundled in at deploy)
 
 import PAGE from '../index.html';
@@ -57,6 +61,17 @@ export default {
     // The page itself, for networks that block github.io. It's public; everything it does still signs in.
     if (request.method === 'GET' && (self.pathname === '/' || self.pathname === '/index.html'))
       return new Response(PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } });
+    // Calendar apps can't sign in or send an Origin, so the link's token is the only key
+    const cal = /^\/cal\/([0-9a-f]{32})\.ics$/.exec(self.pathname);
+    if (cal && (request.method === 'GET' || request.method === 'HEAD')) {
+      try {
+        if (!env.DB) return new Response('No database', { status: 500 });
+        await ensureSchema(env.DB);
+        return await calendarFeed(env.DB, cal[1], request.method === 'HEAD');
+      } catch (e) {
+        return new Response('Server error', { status: 500 });
+      }
+    }
     // A page served from here calls home on the same origin, where browsers may leave Origin off
     const sameOrigin = request.headers.get('Sec-Fetch-Site') === 'same-origin';
     const origin = request.headers.get('Origin') || (sameOrigin ? self.origin : '');
@@ -202,6 +217,23 @@ export default {
         return send(await lookup(url.searchParams.get('q'), env));
       }
 
+      // ---------- phone calendar link ----------
+      if (path === '/feed' && request.method === 'GET') {
+        const row = await db.prepare('SELECT token, last_fetched FROM feeds WHERE eeid = ?').bind(me.eeid).first();
+        return send({ token: row ? row.token : null, lastFetched: row ? row.last_fetched : null });
+      }
+      if (path === '/feed' && request.method === 'POST') {
+        if (body.off) {
+          await db.prepare('DELETE FROM feeds WHERE eeid = ?').bind(me.eeid).run();
+          return send({});
+        }
+        const token = randomHex(16);
+        await db.prepare(`INSERT INTO feeds (eeid, token, created_at, last_fetched) VALUES (?, ?, ?, NULL)
+          ON CONFLICT(eeid) DO UPDATE SET token = excluded.token, created_at = excluded.created_at, last_fetched = NULL`)
+          .bind(me.eeid, token, iso()).run();
+        return send({ token });
+      }
+
       // ---------- admin ----------
       if (path.startsWith('/admin/')) {
         if (!me.admin) return send({ error: 'Admins only' }, 403);
@@ -235,6 +267,7 @@ export default {
             db.prepare('DELETE FROM accounts WHERE eeid = ?').bind(eeid),
             db.prepare('DELETE FROM sessions WHERE eeid = ?').bind(eeid),
             db.prepare('DELETE FROM history WHERE eeid = ?').bind(eeid),
+            db.prepare('DELETE FROM feeds WHERE eeid = ?').bind(eeid),
           ]);
           return send({});
         }
@@ -281,6 +314,10 @@ async function ensureSchema(db) {
       PRIMARY KEY (eeid, version))`),
     db.prepare('CREATE TABLE IF NOT EXISTS attempts (k TEXT NOT NULL, ts INTEGER NOT NULL)'),
     db.prepare('CREATE INDEX IF NOT EXISTS attempts_k_ts ON attempts (k, ts)'),
+    // The token is kept as plain text, not hashed, so the page can show the link and its QR code again.
+    // It only reads one person's calendar, and the threat here is tampering, not snooping.
+    db.prepare(`CREATE TABLE IF NOT EXISTS feeds (
+      eeid TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_fetched TEXT)`),
   ]);
   schemaReady = true;
 }
@@ -310,6 +347,64 @@ async function sessionFor(request, db) {
     ]);
   }
   return { eeid: row.eeid, admin: !!row.admin, tokenHash };
+}
+
+// ---------- phone calendar feed ----------
+// The same entries as the page's Download calendar (.ics): booked ones only, never Fill's gray
+// suggestions, with Bank Days shown as PTO and their notes left off. Built from the saved
+// tracker, so it's current as soon as a change is saved.
+const FEED_PAST_DAYS = 60;
+async function calendarFeed(db, token, headOnly) {
+  const row = await db.prepare('SELECT f.eeid, f.last_fetched, a.data FROM feeds f JOIN accounts a ON a.eeid = f.eeid WHERE f.token = ?')
+    .bind(token).first();
+  if (!row) return new Response('This calendar link was turned off or replaced.', { status: 404 });
+  // Shown on the page as "last checked"; at most one write every 10 minutes
+  if (!row.last_fetched || Date.now() - Date.parse(row.last_fetched) > 600000)
+    await db.prepare('UPDATE feeds SET last_fetched = ? WHERE eeid = ?').bind(iso(), row.eeid).run();
+  return new Response(headOnly ? null : feedIcs(JSON.parse(row.data)), { headers: {
+    'Content-Type': 'text/calendar; charset=utf-8',
+    'Content-Disposition': 'inline; filename="facility-visits.ics"',
+    'Cache-Control': 'no-cache',
+  } });
+}
+function feedIcs(data) {
+  const facs = {};
+  (data.facilities || []).forEach(f => { facs[f.id] = f; });
+  const endOf = v => (!v.facilityId && v.endDate && v.endDate > v.date) ? v.endDate : v.date;
+  const bank = v => !v.facilityId && v.kind === 'bank';
+  const label = v => bank(v) ? 'PTO' : v.facilityId ? (facs[v.facilityId] || { name: '(deleted facility)' }).name : (v.label || 'Other');
+  const ymd = d => d.replace(/-/g, '');
+  const nextDay = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
+  const from = new Date(Date.now() - FEED_PAST_DAYS * 86400000).toISOString().slice(0, 10);
+  const stamp = iso().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const out = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Facility Visit Tracker//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    'X-WR-CALNAME:Facility visits', 'REFRESH-INTERVAL;VALUE=DURATION:PT1H', 'X-PUBLISHED-TTL:PT1H'];
+  (data.visits || []).filter(v => !v.tentative && /^\d{4}-\d{2}-\d{2}$/.test(v.date || '') && endOf(v) >= from)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .forEach(v => {
+      const f = v.facilityId ? facs[v.facilityId] : null;
+      out.push('BEGIN:VEVENT', 'UID:' + v.id + '@facility-visit-tracker', 'DTSTAMP:' + stamp,
+        'DTSTART;VALUE=DATE:' + ymd(v.date), 'DTEND;VALUE=DATE:' + ymd(nextDay(endOf(v))), 'SUMMARY:' + icsEsc(label(v)));
+      if (f && f.address) out.push('LOCATION:' + icsEsc(f.address));
+      if (v.notes && !bank(v)) out.push('DESCRIPTION:' + icsEsc(v.notes));
+      out.push('TRANSP:TRANSPARENT', 'END:VEVENT');
+    });
+  out.push('END:VCALENDAR');
+  return out.map(icsFold).join('\r\n') + '\r\n';
+}
+const icsEsc = s => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+// Lines over 75 bytes carry on in the next line after a space, as the format requires
+const utf8 = new TextEncoder();
+function icsFold(line) {
+  const parts = [];
+  let cur = '', bytes = 0;
+  for (const ch of line) {
+    const n = utf8.encode(ch).length;
+    if (bytes + n > (parts.length ? 74 : 75)) { parts.push(cur); cur = ''; bytes = 0; }
+    cur += ch; bytes += n;
+  }
+  parts.push(cur);
+  return parts.join('\r\n ');
 }
 
 // ---------- rate limits ----------
