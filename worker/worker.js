@@ -40,8 +40,23 @@
 //   No sign-in, for calendar apps:
 //   GET  /cal/<token>.ics                       → the person's booked entries as a calendar feed
 //   GET  /                                      → the app (index.html, bundled in at deploy)
+//   GET  /icon.svg, /apple-touch-icon.png, /icon-192.png, /icon-512.png, /manifest.webmanifest   → its icons
 
 import PAGE from '../index.html';
+import ICON_SVG from '../icon.svg';
+import MANIFEST from '../manifest.webmanifest';
+import ICON_180 from '../apple-touch-icon.png';
+import ICON_192 from '../icon-192.png';
+import ICON_512 from '../icon-512.png';
+
+// The app's icons and home-screen manifest, served alongside the page
+const STATIC = {
+  '/icon.svg': [ICON_SVG, 'image/svg+xml'],
+  '/manifest.webmanifest': [MANIFEST, 'application/manifest+json'],
+  '/apple-touch-icon.png': [ICON_180, 'image/png'],
+  '/icon-192.png': [ICON_192, 'image/png'],
+  '/icon-512.png': [ICON_512, 'image/png'],
+};
 
 const MAX_DATA_BYTES = 1500000;
 const HISTORY_KEEP = 50;            // saved versions kept per person
@@ -61,6 +76,8 @@ export default {
     // The page itself, for networks that block github.io. It's public; everything it does still signs in.
     if (request.method === 'GET' && (self.pathname === '/' || self.pathname === '/index.html'))
       return new Response(PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } });
+    const file = request.method === 'GET' && STATIC[self.pathname];
+    if (file) return new Response(file[0], { headers: { 'Content-Type': file[1], 'Cache-Control': 'public, max-age=86400' } });
     // Calendar apps can't sign in or send an Origin, so the link's token is the only key
     const cal = /^\/cal\/([0-9a-f]{32})\.ics$/.exec(self.pathname);
     if (cal && (request.method === 'GET' || request.method === 'HEAD')) {

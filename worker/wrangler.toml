@@ -15,10 +15,15 @@ binding = "DB"
 database_name = "facility-tracker"
 database_id = "ad1ec226-c72c-4850-9be5-3c221431edfd"
 
-# Bundle ../index.html into the Worker so it can serve the app itself (GET /)
+# Bundle ../index.html and the icons into the Worker so it can serve the app itself (GET /)
 [[rules]]
 type = "Text"
-globs = ["**/*.html"]
+globs = ["**/*.html", "**/*.svg", "**/*.webmanifest"]
+fallthrough = true
+
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
 fallthrough = true
 
 # Secrets come from the account's Secrets Store, so every deploy re-attaches the same values and a bad
