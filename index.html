@@ -9,14 +9,14 @@
   --bg:#f5f6f8; --panel:#ffffff; --text:#1c2230; --muted:#5e6777; --border:#d8dce3;
   --accent:#2457c5; --accent-text:#ffffff;
   --red:#b42318; --red-bg:#fdeceb; --amber:#8a5a00; --amber-bg:#fff4d8;
-  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3; --pto:#7a4fc0; --bank:#0f7f7a; --travel:#b05a1e;
+  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3; --pto:#7a4fc0; --bank:#0f7f7a; --travel:#b05a1e; --trip:#4b5565;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#13161b; --panel:#1c2027; --text:#e6e9ee; --muted:#9aa3b2; --border:#323843;
     --accent:#6f9cff; --accent-text:#0b1020;
     --red:#ff8f85; --red-bg:#3b1f1d; --amber:#f2c065; --amber-bg:#3a3018;
-    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33; --pto:#b796f0; --bank:#5cc8c0; --travel:#f0a060;
+    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33; --pto:#b796f0; --bank:#5cc8c0; --travel:#f0a060; --trip:#aab3c2;
   }
 }
 *{box-sizing:border-box}
@@ -147,6 +147,13 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .ev.sug{background:none;border:1px dashed var(--border);border-left:1px dashed var(--border);color:var(--muted);font-style:italic}
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
 .ev.team.sug{background:none;color:var(--muted)}   /* a tentative Travel Day */
+/* The bar tying a trip's days together; it bleeds across the 1px gaps like a team event's bar */
+.tripbar{margin:3px -5px 0 -4px;padding:0 5px 0 9px;height:15px;background:var(--trip);color:var(--accent-text);font-size:11px;font-weight:600;line-height:15px;overflow:visible;cursor:default}
+.tripbar .lbl{position:relative;z-index:1;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.tripbar.first{margin-left:0;padding-left:5px;border-radius:8px 0 0 8px}
+.tripbar.last{margin-right:0;border-radius:0 8px 8px 0}
+.tripbar.first.last{border-radius:8px}
+.tripbar.sug{background:repeating-linear-gradient(135deg,var(--gray-bg) 0 5px,transparent 5px 10px);box-shadow:inset 0 1px 0 var(--border),inset 0 -1px 0 var(--border);color:var(--muted);font-style:italic}
 .stop{display:inline-block;min-width:14px;margin-right:4px;padding:0 3px;border-radius:7px;background:var(--accent);color:var(--accent-text);font-size:10px;font-weight:700;font-style:normal;line-height:14px;text-align:center}
 .ev.quick{background:none;border:1px solid var(--border);border-left:3px solid var(--accent);color:var(--muted)}
 .ev.done.quick{border-left-color:var(--green)}
@@ -834,7 +841,22 @@ function tripDates(t, start){
   for(let d = start; out.length < t.days.length; d = addDays(d, 1)) if(!isWeekend(d)) out.push(d);
   return out;
 }
-const tripSummary = t => DAYS[t.startDay].slice(0,3) + ': ' + t.days.map(x => x.travel ? 'Travel Day' : (fac(x.fid)||{name:'?'}).name).join(' → ');
+// Trips on the calendar, for the bar that ties their days together. Booked visits don't record
+// which trip they came from, so a trip counts as on the calendar wherever every one of its days
+// has its facility (or Travel Day) on the right date. Moving one away by hand breaks the link.
+function tripsOnCalendar(from, to){
+  const out = [];
+  const has = (day, d) => db.visits.find(v => day.travel ? kindOf(v)==='travel' && v.date<=d && endOf(v)>=d : v.facilityId===day.fid && v.date===d);
+  (db.trips||[]).filter(validTrip).forEach(t => {
+    for(let d = from; d < to; d = addDays(d, 1)){
+      if(parse(d).getDay()!==t.startDay) continue;
+      const ds = tripDates(t, d), found = t.days.map((day, i) => has(day, ds[i]));
+      if(found.every(Boolean)) out.push({t, start:ds[0], end:ds[ds.length-1], tentative:found.some(v => v.tentative)});
+    }
+  });
+  return out;
+}
+const tripSummary = t =>DAYS[t.startDay].slice(0,3) + ': ' + t.days.map(x => x.travel ? 'Travel Day' : (fac(x.fid)||{name:'?'}).name).join(' → ');
 const inAnyTrip = fid => (db.trips||[]).some(t => t.days.some(x => x.fid===fid));
 
 // ---------- day order and re-planning ----------
@@ -1181,6 +1203,7 @@ function renderSchedule(){
   // Calendar
   const vs = rangeVisits(r);
   const t = today();
+  const tripRuns = tripsOnCalendar(addDays(r.start, -14), r.end);
   h += '<div class="calwrap"><div class="cal">' + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="dow">${d}</div>`).join('');
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7);
@@ -1195,7 +1218,13 @@ function renderSchedule(){
         d.endsWith('-01')?'mstart':'', monthStart && d<monthStart?'othermonth':''].filter(Boolean).join(' ');
       const num = d.endsWith('-01') ? fmt(d) : String(parse(d).getDate());
       const tag = hol || (office ? 'Office day' : '');
-      const events = vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
+      // One bar across a trip's days, weekends in between included, named where it starts or enters the week
+      const bars = tripRuns.filter(x => x.start<=d && x.end>=d).map(x => {
+        const rowEnd = addDays(ws, 6), barEnd = x.end < rowEnd ? x.end : rowEnd;
+        const label = x.start===d || (i===0 && x.start<ws) ? `<span class="lbl" data-to="${barEnd}">${esc(x.t.name)}</span>` : '&nbsp;';
+        return `<div class="tripbar${x.start===d?' first':''}${x.end===d?' last':''}${x.tentative?' sug':''}" title="${esc(x.t.name)}${x.tentative?' (tentative)':''} · ${fmt(x.start)} – ${fmt(x.end)}">${label}</div>`;
+      }).join('');
+      const events =vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
         const first = v.date===d, lastDay = endOf(v)===d, labelHere = first || (i===0 && v.date<ws);
         // The name sits in the bar's first cell this week and runs across to the bar's last cell (see sizeEventLabels)
         const rowEnd = addDays(ws, 6), barEnd = endOf(v) < rowEnd ? endOf(v) : rowEnd;
@@ -1220,7 +1249,7 @@ function renderSchedule(){
       const concur = cd.date!==d ? '' : cd.unverified
         ? '<div class="concur" title="Concur expense report due. Unverified: assumes Memorial Day is a Concur holiday.">CONCUR DUE?</div>'
         : '<div class="concur" title="Concur expense report due">CONCUR DUE</div>';
-      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${concur}</div>`;
+      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${bars}${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${concur}</div>`;
     }
   }
   return h + '</div></div></div>';
@@ -1525,7 +1554,7 @@ function render(){
 // reads across the days instead of being cut off at the first one. The label ignores the
 // pointer, so clicks and drops land on whichever day is underneath.
 function sizeEventLabels(){
-  document.querySelectorAll('.ev.team .lbl[data-to]').forEach(lbl => {
+  document.querySelectorAll('.ev.team .lbl[data-to], .tripbar .lbl[data-to]').forEach(lbl => {
     const last = document.querySelector(`.day[data-date="${lbl.dataset.to}"]`);
     if(!last) return;
     const right = last.getBoundingClientRect().right - 6;
