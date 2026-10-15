@@ -178,8 +178,8 @@ body.dragging-visit .drop-hint{display:block}
   <header class="top"><h1>Facility Visit Tracker</h1>
     <div id="who" class="small muted"></div></header>
   <nav id="tabs">
-    <button data-tab="status">Status</button>
     <button data-tab="schedule">Schedule</button>
+    <button data-tab="status">Status</button>
     <button data-tab="log">Visit log</button>
     <button data-tab="facilities">Facilities</button>
     <button data-tab="settings">Data &amp; settings</button>
@@ -352,6 +352,7 @@ let session = readJson(SESSION_KEY) || {};
 let ready = false;   // true once a user's data is loaded
 const sync = {version:0, dirty:false, inflight:false, state:'saved', error:'', retry:null, timer:null};
 let ui = readJson(UIKEY) || {};
+delete ui.tab;   // the app always opens on Schedule (or the Tutorial with no facilities yet); the tab is kept only while it's open
 function saveUi(){ writeJson(UIKEY, ui); }
 
 const cacheKey = () => CACHE_PREFIX + (session.eeid||'');
@@ -1535,8 +1536,8 @@ function render(){
   document.body.classList.remove('signed-out');
   document.getElementById('who').innerHTML = `${esc(session.name||session.eeid)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="sign-out">Sign out</button>`;
   document.querySelector('#tabs [data-tab=admin]').hidden = !session.admin;
-  let tab = ui.tab || (db.facilities.length ? 'status' : 'tutorial');
-  if(tab==='admin' && !session.admin) tab = 'status';
+  let tab = ui.tab || (db.facilities.length ? 'schedule' : 'tutorial');
+  if(tab==='admin' && !session.admin) tab = 'schedule';
   document.body.dataset.view = tab;   // for CSS only; must not be data-tab, which the click handler treats as a tab button
   document.querySelectorAll('#tabs button').forEach(b => {
     b.classList.toggle('on', b.dataset.tab===tab);
