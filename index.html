@@ -8,27 +8,33 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-title" content="Visit Tracker">
+<!-- Night mode is a per-browser choice (Data & settings); set it before the page paints so it doesn't flash light -->
+<script>try{ if(localStorage.getItem('facilityVisitTracker.night')==='1') document.documentElement.dataset.theme = 'dark'; }catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Inter+Tight:wght@400;500;600;700&display=swap">
 <style>
+/* Day look ("Soft tiles"): rounded day tiles and pill-shaped entries. Night look ("Midnight"): the square grid in dark slate */
 :root{
-  --bg:#f5f6f8; --panel:#ffffff; --text:#1c2230; --muted:#5e6777; --border:#d8dce3;
-  --accent:#2457c5; --accent-text:#ffffff;
-  --red:#b42318; --red-bg:#fdeceb; --amber:#8a5a00; --amber-bg:#fff4d8;
-  --green:#1e6b3a; --green-bg:#e4f4e9; --blue:#2457c5; --blue-bg:#e7eefc; --gray-bg:#eef0f3; --pto:#7a4fc0; --bank:#0f7f7a; --travel:#b05a1e; --trip:#4b5565;
+  --bg:#f3f4fa; --panel:#ffffff; --text:#262a3d; --muted:#6c7189; --border:#e3e5f0;
+  --accent:#5b6cf0; --accent-text:#ffffff;
+  --red:#b42318; --red-bg:#fdeceb; --amber:#8a5a00; --amber-bg:#fff4dc;
+  --green:#257a4d; --green-bg:#e3f6ea; --blue:#4a5ad8; --blue-bg:#eceffe; --gray-bg:#f6f7fb; --pto:#9b6ee8; --bank:#1fa49c; --travel:#ec8a4a; --trip:#8a90ad;
+  --font:"Nunito",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#13161b; --panel:#1c2027; --text:#e6e9ee; --muted:#9aa3b2; --border:#323843;
-    --accent:#6f9cff; --accent-text:#0b1020;
-    --red:#ff8f85; --red-bg:#3b1f1d; --amber:#f2c065; --amber-bg:#3a3018;
-    --green:#82d69c; --green-bg:#18301f; --blue:#8fb2ff; --blue-bg:#1d2a44; --gray-bg:#262b33; --pto:#b796f0; --bank:#5cc8c0; --travel:#f0a060; --trip:#aab3c2;
-  }
+:root[data-theme="dark"]{
+  --bg:#101420; --panel:#181d2c; --text:#e8ebf4; --muted:#8e97ad; --border:#283048;
+  --accent:#7aa2ff; --accent-text:#0b1020;
+  --red:#ff8a80; --red-bg:#3b1f1d; --amber:#f2c065; --amber-bg:#3a3018;
+  --green:#7ee2a8; --green-bg:#173327; --blue:#8fb2ff; --blue-bg:#1f2a48; --gray-bg:#141927; --pto:#a98bf0; --bank:#3fc1b8; --travel:#f0965a; --trip:#596383;
+  --font:"Inter Tight",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:dark;
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}   /* labels and .check rows set display, which would otherwise override hidden */
 html{scrollbar-gutter:stable}   /* no sideways jump when a tab is short enough to lose the scrollbar */
 /* Stop iPhone Safari enlarging text it thinks is too small, which blew up multi-day event names */
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 var(--font)}
 .wrap{max-width:960px;margin:0 auto;padding:16px}
 header h1{font-size:20px;margin:0 0 12px}
 nav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:16px}
@@ -175,6 +181,36 @@ body.dragging-visit .drop-hint{display:block}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 @media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
+
+/* ---- Day look: separate rounded day tiles. Bars bleed 12px each side (6px padding + 6px gap) to join across tiles ---- */
+html:not([data-theme="dark"]) .cal{background:none;border:none;gap:6px;border-radius:0;overflow:visible}
+html:not([data-theme="dark"]) .day{border-radius:12px;box-shadow:0 1px 2px rgba(38,42,61,.06),0 0 0 1px var(--border);min-height:88px;padding:6px}
+html:not([data-theme="dark"]) .dow{background:none;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:11px}
+html:not([data-theme="dark"]) .cal .mon{background:none;font-size:20px;font-weight:800;padding:14px 4px 4px}
+html:not([data-theme="dark"]) .dnum{font-size:13px;font-weight:800}
+html:not([data-theme="dark"]) .day.today .dnum{border-radius:999px}
+html:not([data-theme="dark"]) .ev{border:none;border-radius:999px;padding:3px 9px;font-weight:600}
+html:not([data-theme="dark"]) .ev.done{background:var(--green-bg)}
+html:not([data-theme="dark"]) .ev.quick{border:1.5px dashed var(--border);background:none}
+html:not([data-theme="dark"]) .ev.sug{border:1.5px dashed #c9cce0;border-radius:999px}
+html:not([data-theme="dark"]) .ev.team{border-radius:999px;margin-left:0;margin-right:0;width:100%;padding-left:9px}
+html:not([data-theme="dark"]) .ev.team:not(.first){border-top-left-radius:0;border-bottom-left-radius:0;margin-left:-12px;width:calc(100% + 12px)}
+html:not([data-theme="dark"]) .ev.team:not(.last){border-top-right-radius:0;border-bottom-right-radius:0;margin-right:-12px;width:calc(100% + 12px)}
+html:not([data-theme="dark"]) .ev.team:not(.first):not(.last){width:calc(100% + 24px)}
+html:not([data-theme="dark"]) .tripbar{border-radius:0;margin-left:-12px;margin-right:-12px}
+html:not([data-theme="dark"]) .tripbar.first{margin-left:0;border-radius:999px 0 0 999px}
+html:not([data-theme="dark"]) .tripbar.last{margin-right:0;border-radius:0 999px 999px 0}
+html:not([data-theme="dark"]) .tripbar.first.last{border-radius:999px}
+html:not([data-theme="dark"]) .pchip{border-radius:10px;border-left-width:5px}
+html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
+
+/* ---- Night look: same square grid as before, softer bright colours on slate ---- */
+[data-theme="dark"] .ev:not(.team){border-radius:6px;border-left-width:2px}
+[data-theme="dark"] .ev.team{color:#0b1020;font-weight:600}
+[data-theme="dark"] .ev.team.sug{color:var(--muted);font-weight:400}
+[data-theme="dark"] .day.today{box-shadow:inset 0 0 0 1px var(--accent),0 0 18px rgba(122,162,255,.25)}
+[data-theme="dark"] .tripbar{color:var(--text)}
+[data-theme="dark"] .dnum{font-weight:500}
 </style>
 </head>
 <body>
@@ -1462,6 +1498,11 @@ function renderSettings(){
       <label>Your name (shown at the top of the email text and calendar)<input data-set="yourName" value="${esc(s.yourName)}"></label>
     </div>
     <div class="panel">
+      <h2 style="margin-top:0">Appearance</h2>
+      <label class="check"><input type="checkbox" id="nightMode" ${document.documentElement.dataset.theme==='dark'?'checked':''}> Night mode</label>
+      <p class="small muted" style="margin:0">Dark colours for this browser only. Your other devices keep their own setting.</p>
+    </div>
+    <div class="panel">
       <h2 style="margin-top:0">Your account</h2>
       <p class="small">Signed in as <b>${esc(session.name||'')}</b> (employee ID ${esc(session.eeid)}). This browser stays signed in until you sign out or clear its site data.</p>
       <div class="row">
@@ -2135,6 +2176,11 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if(t.classList.contains('concur-cb')){ const v = db.visits.find(x => x.id===t.dataset.id); if(v){ v.concur = t.checked; save(); } return; }
+  if(t.id==='nightMode'){
+    if(t.checked) document.documentElement.dataset.theme = 'dark'; else delete document.documentElement.dataset.theme;
+    try{ localStorage.setItem('facilityVisitTracker.night', t.checked ? '1' : '0'); }catch(e){}
+    return;
+  }
   if(t.dataset.set){
     const k = t.dataset.set;
     if(k==='yourName') db.settings[k] = t.value.trim();
