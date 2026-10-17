@@ -2,6 +2,7 @@
   "name": "Facility Visit Tracker",
   "short_name": "Visit Tracker",
   "start_url": "./",
+  "display": "standalone",
   "background_color": "#f5f6f8",
   "theme_color": "#2457c5",
   "icons": [
