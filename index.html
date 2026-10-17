@@ -17,7 +17,7 @@ const deviceDark = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)'
 function applyTheme(){
   const p = themePref(), dark = p==='dark' || (p==='auto' && !!deviceDark && deviceDark.matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  const sw = document.getElementById('nightMode'); if(sw) sw.checked = dark;   // Data & settings open while the device switches
+  const sw = document.getElementById('nightMode'); if(sw) sw.checked = dark;   // keep the switch in step when the device switches
 }
 try{ if(localStorage.getItem('facilityVisitTracker.night')==='1') localStorage.setItem(THEME_KEY, 'dark'); localStorage.removeItem('facilityVisitTracker.night'); }catch(e){}   // the earlier on/off switch
 applyTheme();
@@ -52,7 +52,7 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 var(--font)}
 header h1{font-size:20px;margin:0 0 12px}
 nav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:16px}
 nav button{background:none;border:none;border-bottom:3px solid transparent;padding:8px 12px;color:var(--muted);font:inherit;cursor:pointer}
-header.top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+header.top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 header.top h1{margin:0}
 .linkish{background:none;border:none;padding:0;color:var(--accent);cursor:pointer;font:inherit;text-decoration:underline}
 body.signed-out nav,body.signed-out #who,body.gate header.top{display:none}
@@ -195,13 +195,14 @@ body.dragging-visit .drop-hint{display:block}
 #toast.show{opacity:1}
 @media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
 
-/* Day/night switch in Data & settings: sun, sliding switch, moon */
-.theme-switch{display:inline-flex;align-items:center;gap:10px;margin:0;color:var(--muted);cursor:pointer}
-.theme-switch svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.theme-switch input{appearance:none;-webkit-appearance:none;position:relative;width:52px;height:30px;margin:0;border-radius:999px;background:var(--border);cursor:pointer;transition:background .2s}
-.theme-switch input::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .2s}
+/* Day/night switch, top right on every tab: sun, sliding switch, moon */
+.top-right{display:flex;align-items:center;gap:14px;margin-left:auto}
+.theme-switch{display:inline-flex;align-items:center;gap:5px;margin:0;color:var(--muted);cursor:pointer}
+.theme-switch svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.theme-switch input{appearance:none;-webkit-appearance:none;position:relative;width:34px;height:20px;margin:0;border-radius:999px;background:var(--border);cursor:pointer;transition:background .2s}
+.theme-switch input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .2s}
 .theme-switch input:checked{background:var(--accent)}
-.theme-switch input:checked::after{transform:translateX(22px)}
+.theme-switch input:checked::after{transform:translateX(14px)}
 .theme-switch input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .theme-switch:has(input:not(:checked)) svg:first-child{color:var(--amber)}   /* light up whichever look is on */
 .theme-switch:has(input:checked) svg:last-child{color:var(--accent)}
@@ -241,7 +242,12 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
 <body>
 <div class="wrap">
   <header class="top"><h1>Facility Visit Tracker</h1>
-    <div id="who" class="small muted"></div></header>
+    <div class="top-right"><div id="who" class="small muted"></div>
+      <label class="theme-switch" title="Day or night look">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+        <input type="checkbox" role="switch" id="nightMode" aria-label="Night mode">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+      </label></div></header>
   <nav id="tabs">
     <button data-tab="schedule">Schedule</button>
     <button data-tab="status">Status</button>
@@ -1523,14 +1529,6 @@ function renderSettings(){
       <label>Your name (shown at the top of the email text and calendar)<input data-set="yourName" value="${esc(s.yourName)}"></label>
     </div>
     <div class="panel">
-      <h2 style="margin-top:0">Appearance</h2>
-      <label class="theme-switch" title="Day or night look">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
-        <input type="checkbox" role="switch" id="nightMode" aria-label="Night mode" ${document.documentElement.dataset.theme==='dark'?'checked':''}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
-      </label>
-    </div>
-    <div class="panel">
       <h2 style="margin-top:0">Your account</h2>
       <p class="small">Signed in as <b>${esc(session.name||'')}</b> (employee ID ${esc(session.eeid)}). This browser stays signed in until you sign out or clear its site data.</p>
       <div class="row">
@@ -2201,6 +2199,7 @@ document.addEventListener('click', async e => {
       break;
   }
 });
+applyTheme();   // the head script ran before the switch existed
 document.addEventListener('change', e => {
   const t = e.target;
   if(t.classList.contains('concur-cb')){ const v = db.visits.find(x => x.id===t.dataset.id); if(v){ v.concur = t.checked; save(); } return; }
