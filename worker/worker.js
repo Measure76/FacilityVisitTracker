@@ -40,7 +40,7 @@
 //   No sign-in, for calendar apps:
 //   GET  /cal/<token>.ics                       → the person's booked entries as a calendar feed
 //   GET  /                                      → the app (index.html, bundled in at deploy)
-//   GET  /icon.svg, /apple-touch-icon.png, /icon-192.png, /icon-512.png, /manifest.webmanifest   → its icons
+//   GET  /icon.svg, /apple-touch-icon.png (+ -precomposed), /icon-192.png, /icon-512.png, /manifest.webmanifest   → its icons
 
 import PAGE from '../index.html';
 import ICON_SVG from '../icon.svg';
@@ -54,6 +54,7 @@ const STATIC = {
   '/icon.svg': [ICON_SVG, 'image/svg+xml'],
   '/manifest.webmanifest': [MANIFEST, 'application/manifest+json'],
   '/apple-touch-icon.png': [ICON_180, 'image/png'],
+  '/apple-touch-icon-precomposed.png': [ICON_180, 'image/png'],   // iOS asks for this name too
   '/icon-192.png': [ICON_192, 'image/png'],
   '/icon-512.png': [ICON_512, 'image/png'],
 };
@@ -74,10 +75,12 @@ export default {
   async fetch(request, env) {
     const self = new URL(request.url);
     // The page itself, for networks that block github.io. It's public; everything it does still signs in.
-    if (request.method === 'GET' && (self.pathname === '/' || self.pathname === '/index.html'))
-      return new Response(PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } });
-    const file = request.method === 'GET' && STATIC[self.pathname];
-    if (file) return new Response(file[0], { headers: { 'Content-Type': file[1], 'Cache-Control': 'public, max-age=86400' } });
+    // HEAD too: a phone checking for the icon before fetching it must not get a 403 and fall back to a letter
+    const read = request.method === 'GET' || request.method === 'HEAD';
+    if (read && (self.pathname === '/' || self.pathname === '/index.html'))
+      return new Response(request.method === 'HEAD' ? null : PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } });
+    const file = read && STATIC[self.pathname];
+    if (file) return new Response(request.method === 'HEAD' ? null : file[0], { headers: { 'Content-Type': file[1], 'Cache-Control': 'public, max-age=86400' } });
     // Calendar apps can't sign in or send an Origin, so the link's token is the only key
     const cal = /^\/cal\/([0-9a-f]{32})\.ics$/.exec(self.pathname);
     if (cal && (request.method === 'GET' || request.method === 'HEAD')) {
