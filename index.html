@@ -195,6 +195,18 @@ body.dragging-visit .drop-hint{display:block}
 #toast.show{opacity:1}
 @media (max-width:560px){ .item .date{width:auto} .chip{min-width:0;flex:1} .wide-only{display:none} }
 
+/* Day/night switch in Data & settings: sun, sliding switch, moon */
+.theme-switch{display:inline-flex;align-items:center;gap:10px;margin:0;color:var(--muted);cursor:pointer}
+.theme-switch svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.theme-switch input{appearance:none;-webkit-appearance:none;position:relative;width:52px;height:30px;margin:0;border-radius:999px;background:var(--border);cursor:pointer;transition:background .2s}
+.theme-switch input::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .2s}
+.theme-switch input:checked{background:var(--accent)}
+.theme-switch input:checked::after{transform:translateX(22px)}
+.theme-switch input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.theme-switch:has(input:not(:checked)) svg:first-child{color:var(--amber)}   /* light up whichever look is on */
+.theme-switch:has(input:checked) svg:last-child{color:var(--accent)}
+@media (prefers-reduced-motion:reduce){ .theme-switch input,.theme-switch input::after{transition:none} }
+
 /* ---- Day look: separate rounded day tiles. Bars bleed 12px each side (6px padding + 6px gap) to join across tiles ---- */
 html:not([data-theme="dark"]) .cal{background:none;border:none;gap:6px;border-radius:0;overflow:visible}
 html:not([data-theme="dark"]) .day{border-radius:12px;box-shadow:0 1px 2px rgba(38,42,61,.06),0 0 0 1px var(--border);min-height:88px;padding:6px}
@@ -1512,8 +1524,11 @@ function renderSettings(){
     </div>
     <div class="panel">
       <h2 style="margin-top:0">Appearance</h2>
-      <label class="check"><input type="checkbox" id="nightMode" ${document.documentElement.dataset.theme==='dark'?'checked':''}> Night mode</label>
-      <p class="small muted" style="margin:0">Until you flip this, it follows your phone or computer's dark mode. Once flipped, it stays the way you set it in this browser; your other devices keep their own.</p>
+      <label class="theme-switch" title="Day or night look">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+        <input type="checkbox" role="switch" id="nightMode" aria-label="Night mode" ${document.documentElement.dataset.theme==='dark'?'checked':''}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+      </label>
     </div>
     <div class="panel">
       <h2 style="margin-top:0">Your account</h2>
