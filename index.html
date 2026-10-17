@@ -117,6 +117,8 @@ textarea.out{width:100%;height:300px;font:13px/1.4 ui-monospace,Consolas,monospa
 .palette{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 6px}
 /* The schedule spreads wider than the page, evenly both sides, so the title and tabs stay put */
 body[data-view=schedule] #view{width:min(1240px, calc(100vw - 32px));margin-left:calc(50% - min(620px, 50vw - 16px))}
+/* ...and the header's right side (name, Sign out, day/night switch) reaches the same right edge as the calendar */
+body[data-view=schedule] header.top{margin-right:calc(50% - min(620px, 50vw - 16px))}
 .sched{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;align-items:start;margin-top:12px}
 .side{position:sticky;top:8px;max-height:calc(100vh - 16px);overflow-y:auto}
 .side h3{margin-top:0}
