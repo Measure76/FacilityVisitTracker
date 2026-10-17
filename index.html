@@ -8,8 +8,20 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-title" content="Visit Tracker">
-<!-- Night mode is a per-browser choice (Data & settings); set it before the page paints so it doesn't flash light -->
-<script>try{ if(localStorage.getItem('facilityVisitTracker.night')==='1') document.documentElement.dataset.theme = 'dark'; }catch(e){}</script>
+<!-- Day or night look: follows the device's dark mode unless Data & settings picks one for this browser.
+     Set before the page paints so it doesn't flash the wrong colours, and again whenever the device switches. -->
+<script>
+const THEME_KEY = 'facilityVisitTracker.theme';   // 'light' | 'dark'; missing = match the device
+function themePref(){ try{ return localStorage.getItem(THEME_KEY) || 'auto'; }catch(e){ return 'auto'; } }
+const deviceDark = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+function applyTheme(){
+  const p = themePref(), dark = p==='dark' || (p==='auto' && !!deviceDark && deviceDark.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+try{ if(localStorage.getItem('facilityVisitTracker.night')==='1') localStorage.setItem(THEME_KEY, 'dark'); localStorage.removeItem('facilityVisitTracker.night'); }catch(e){}   // the earlier on/off switch
+applyTheme();
+if(deviceDark){ if(deviceDark.addEventListener) deviceDark.addEventListener('change', applyTheme); else if(deviceDark.addListener) deviceDark.addListener(applyTheme); }
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Inter+Tight:wght@400;500;600;700&display=swap">
 <style>
@@ -1499,8 +1511,9 @@ function renderSettings(){
     </div>
     <div class="panel">
       <h2 style="margin-top:0">Appearance</h2>
-      <label class="check"><input type="checkbox" id="nightMode" ${document.documentElement.dataset.theme==='dark'?'checked':''}> Night mode</label>
-      <p class="small muted" style="margin:0">Dark colours for this browser only. Your other devices keep their own setting.</p>
+      <label>Day or night look<select id="themePref">${[['auto','Match this device'],['light','Day'],['dark','Night']].map(([v,l]) =>
+        `<option value="${v}" ${themePref()===v?'selected':''}>${l}</option>`).join('')}</select></label>
+      <p class="small muted" style="margin:0"><b>Match this device</b> follows your phone or computer's dark mode. The choice applies to this browser only; your other devices keep their own.</p>
     </div>
     <div class="panel">
       <h2 style="margin-top:0">Your account</h2>
@@ -2176,10 +2189,9 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if(t.classList.contains('concur-cb')){ const v = db.visits.find(x => x.id===t.dataset.id); if(v){ v.concur = t.checked; save(); } return; }
-  if(t.id==='nightMode'){
-    if(t.checked) document.documentElement.dataset.theme = 'dark'; else delete document.documentElement.dataset.theme;
-    try{ localStorage.setItem('facilityVisitTracker.night', t.checked ? '1' : '0'); }catch(e){}
-    return;
+  if(t.id==='themePref'){
+    try{ if(t.value==='auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, t.value); }catch(e){}
+    applyTheme(); return;
   }
   if(t.dataset.set){
     const k = t.dataset.set;
