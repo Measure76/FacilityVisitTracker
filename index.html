@@ -187,6 +187,23 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .drop-hint{display:none;margin:0 0 10px;padding:10px;border:1px dashed var(--accent);border-radius:6px;color:var(--accent);font-size:13px;font-weight:600;text-align:center}
 body.dragging-visit .drop-hint{display:block}
 .pchip.trip{border-left-color:var(--accent);background:var(--gray-bg)}
+/* Day sheet: sits at the top so the phone keyboard doesn't cover the results */
+#dayDlg{margin:12px auto auto}
+#dayDlg h2{margin-bottom:10px}
+#dayList:empty{display:none}
+.drow{display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--border)}
+.drow:first-child{border-top:none}
+.drow .what{flex:1;min-width:0;text-align:left;border:none;border-left:4px solid var(--accent);border-radius:4px;background:var(--blue-bg);padding:6px 8px}
+.drow .what.done{border-left-color:var(--green);background:var(--green-bg)}
+.drow .what.pto{border-left-color:var(--pto)} .drow .what.bank{border-left-color:var(--bank)} .drow .what.travel{border-left-color:var(--travel)}
+.drow .what.sug{background:none;border:1px dashed var(--border);color:var(--muted);font-style:italic}
+.drow .what .sub{display:block;color:var(--muted);font-size:12px;font-style:normal}
+.drow button.icon{min-width:36px;padding:6px 0}
+#dayAdd{margin-top:8px}
+#daySearch{width:100%;font-size:16px}   /* 16px keeps iPhone from zooming in on focus */
+#dayResults{max-height:42vh;overflow-y:auto;margin-top:6px;display:flex;flex-direction:column;gap:4px}
+#dayResults .pchip{display:block;width:100%;text-align:left;font-size:15px;padding:8px 10px;cursor:pointer}
+#dayResults .pchip .sub{display:block;margin-left:0}
 .tut h2{margin:0 0 6px}
 .tut ul{margin:6px 0 10px;padding-left:20px}
 .tut li{margin-bottom:4px}
@@ -364,6 +381,20 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
   <div class="list" id="histList" style="max-height:55vh;overflow:auto"></div>
   <div class="dlg-actions" style="margin-top:12px"><span class="grow"></span>
     <button type="button" data-act="close">Close</button>
+  </div>
+</dialog>
+
+<dialog id="dayDlg">
+  <h2 id="dayTitle"></h2>
+  <div id="dayList"></div>
+  <div id="dayAdd">
+    <input type="search" id="daySearch" placeholder="Search facilities, PTO, Bank Day…" autocomplete="off" enterkeyhint="go">
+    <div id="dayResults"></div>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" id="dayAddBtn">+ Add another</button>
+    <span class="grow"></span>
+    <button type="button" data-act="close">Done</button>
   </div>
 </dialog>
 
@@ -1244,20 +1275,15 @@ function renderSchedule(){
     <button data-act="phone-cal" title="Show your booked entries in your phone's calendar app, kept up to date">Phone calendar</button>
   </div>`;
 
+  // On a touch screen the palette is gone: tapping a day opens the day sheet instead
+  if(touchUi()) return h + '<p class="palette-hint">Tap a day to add to it or change it.</p>' + renderCalendar(r);
 
   // Sidebar: soonest next due first, where a booking counts as a visit (never visited at the
   // top), so a facility drops down the list once it's booked; colored by due status, dimmed when booked
-  const sug = visibleSuggestions(), sugFor = {};
-  const tripSug = {};
-  Object.keys(sug).sort().forEach(d => { const x = sug[d]; if(x.f && !sugFor[x.f.id]) sugFor[x.f.id] = d; if(x.trip && !tripSug[x.trip.id]) tripSug[x.trip.id] = x.start; });
-  const rot = rotationVisits();
-  const nextDue = st => { const ds = db.visits.filter(v => v.facilityId===st.f.id && rot.has(v)).map(v => v.date).sort();
-    return ds.length ? addDays(ds[ds.length-1], st.info.weeks*7) : ''; };
-  const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || nextDue(a).localeCompare(nextDue(b)) || a.f.name.localeCompare(b.f.name));
+  const {sugFor, tripSug, byLast} = paletteOrder();
   const chips = byLast.map(st => {
     const booked = !!st.next && !st.nextTentative;
-    const sub = (st.f.ancillary ? 'ancillary · ' : '') + (st.next ? (st.nextTentative ? 'tentative ' : 'booked ')+fmt(st.next)
-      : (st.last ? 'last visit '+ago(daysBetween(st.last, today())) : 'never visited') + (sugFor[st.f.id] ? ' · suggested '+fmt(sugFor[st.f.id]) : ''));
+    const sub = facilitySub(st, sugFor);
     const armed = placing && placing.kind==='fac' && placing.fid===st.f.id;
     return `<button class="pchip ${st.level}${booked?' booked':''}${armed?' armed':''}" draggable="true" data-drag="fac" data-fid="${st.f.id}" data-act="arm"
       title="${esc(statusText(st))}${st.next?' · next planned '+fmt(st.next):''}">${esc(st.f.name)}${st.f.type==='remote'?' ✈':''}<span class="sub">${sub}</span></button>`;
@@ -1273,8 +1299,26 @@ function renderSchedule(){
     <p class="palette-hint">${placing ? '<b>Now tap a day</b> to place it. Tap the button again to cancel.'
       : 'Drag onto a day, or tap and then tap a day. Anything placed by hand is locked to its day; drag it back over here to clear the day. Several facilities can share a day: drag them up or down to set the order you drive them in. Only the top one counts toward its rotation; the rest are quick stops. <b>Fill next 4 weeks</b> adds <i>gray dashed tentative entries</i>: click one to lock it. Click a solid entry to edit it.'}</p>
   </aside>`;
+  return h + renderCalendar(r) + '</div>';
+}
+// The sidebar's order: soonest next due first, where a booking counts as a visit (never visited
+// at the top), plus each facility's and trip's first suggested day on the visible calendar
+function paletteOrder(){
+  const sug = visibleSuggestions(), sugFor = {};
+  const tripSug = {};
+  Object.keys(sug).sort().forEach(d => { const x = sug[d]; if(x.f && !sugFor[x.f.id]) sugFor[x.f.id] = d; if(x.trip && !tripSug[x.trip.id]) tripSug[x.trip.id] = x.start; });
+  const rot = rotationVisits();
+  const nextDue = st => { const ds = db.visits.filter(v => v.facilityId===st.f.id && rot.has(v)).map(v => v.date).sort();
+    return ds.length ? addDays(ds[ds.length-1], st.info.weeks*7) : ''; };
+  const byLast = allStatus().sort((a,b) => (!!a.f.ancillary - !!b.f.ancillary) || nextDue(a).localeCompare(nextDue(b)) || a.f.name.localeCompare(b.f.name));
+  return {sug, sugFor, tripSug, byLast};
+}
+const facilitySub = (st, sugFor) => (st.f.ancillary ? 'ancillary · ' : '') + (st.next ? (st.nextTentative ? 'tentative ' : 'booked ')+fmt(st.next)
+  : (st.last ? 'last visit '+ago(daysBetween(st.last, today())) : 'never visited') + (sugFor[st.f.id] ? ' · suggested '+fmt(sugFor[st.f.id]) : ''));
 
-  // Calendar
+function renderCalendar(r){
+  let h = '';
+  const rot = rotationVisits();
   const vs = rangeVisits(r);
   const t = today();
   const tripRuns = tripsOnCalendar(addDays(r.start, -14), r.end);
@@ -1326,7 +1370,7 @@ function renderSchedule(){
       h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${bars}${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${concur}</div>`;
     }
   }
-  return h + '</div></div></div>';
+  return h + '</div></div>';
 }
 
 // ---------- drag & drop / tap-to-place ----------
@@ -1474,6 +1518,100 @@ document.addEventListener('keydown', e => {
   if((e.key==='Enter' || e.key===' ') && e.target.matches('.item.click')){ e.preventDefault(); e.target.click(); }
 });
 
+// ---------- day sheet ----------
+// Tapping a day (on a touch screen) or its empty space (with a mouse) lists what's on it, to
+// remove or reorder, and searches facilities and entry types to add. Picks go through dropOn,
+// so they get the same checks as a drag.
+const dayDlg = document.getElementById('dayDlg'), daySearch = document.getElementById('daySearch');
+let sheetDate = null;
+const KIND_WORDS = {team:'team meeting project', pto:'pto vacation time off', bank:'bank day', travel:'travel day flight fly'};
+function openDay(d){
+  sheetDate = d;
+  document.getElementById('dayTitle').textContent = fmtDay(d);
+  drawDay(!dayEntries(d).length);
+  dayDlg.showModal();
+  if(!dayEntries(d).length) daySearch.focus();
+}
+const dayEntries = d => db.visits.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).concat(dayVisits(d));
+function drawDay(searching){
+  const d = sheetDate, entries = dayEntries(d), facs = dayVisits(d), rot = rotationVisits();
+  document.getElementById('dayList').innerHTML = entries.map(v => {
+    const i = facs.indexOf(v), n = v.facilityId ? stopOf(v, true) : 0;
+    const sub = v.tentative ? 'Tentative · tap to lock'
+      : !v.facilityId ? (v.endDate && v.endDate!==v.date ? whenText(v) : '')
+      : (n ? 'Stop '+n : '') + (isQuickStop(v, rot) ? (n ? ' · ' : '')+'quick stop' : '');
+    const cls = ['what', v.tentative ? 'sug' : v.facilityId ? (isDone(v) ? 'done' : '') : kindOf(v)].join(' ');
+    return `<div class="drow"><button type="button" class="${cls}" data-day="${v.tentative ? 'lock' : 'edit'}" data-id="${v.id}">${esc(visitLabel(v))}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</button>
+      ${n ? `<button type="button" class="icon" data-day="up" data-id="${v.id}" ${i===0?'disabled':''} title="Earlier stop" aria-label="Move up">↑</button>
+      <button type="button" class="icon" data-day="down" data-id="${v.id}" ${i===facs.length-1?'disabled':''} title="Later stop" aria-label="Move down">↓</button>` : ''}
+      <button type="button" class="icon danger" data-day="remove" data-id="${v.id}" title="Remove" aria-label="Remove">✕</button></div>`;
+  }).join('');
+  document.getElementById('dayAdd').hidden = !searching;
+  document.getElementById('dayAddBtn').hidden = searching;
+  if(searching){ daySearch.value = ''; drawResults(); }
+}
+// Everything that can go on a day. With nothing typed: this day's suggestion first, then the
+// entry types, trips and facilities in the sidebar's order.
+function dayCandidates(){
+  const {sug, byLast} = paletteOrder(), here = sug[sheetDate];
+  const there = new Set(dayVisits(sheetDate).filter(solid).map(v => v.facilityId));
+  const facs = byLast.filter(st => !there.has(st.f.id)).map(st => ({pick:'fac:'+st.f.id, name:st.f.name+(st.f.type==='remote'?' ✈':''),
+    words:st.f.name, cls:st.level, sub:here && here.f && here.f.id===st.f.id ? 'suggested for this day' : facilitySub(st, {})}));
+  const top = here && here.f ? facs.filter(x => x.pick==='fac:'+here.f.id) : [];
+  return top.concat(
+    Object.keys(KINDS).map(k => ({pick:k, name:KINDS[k], words:KIND_WORDS[k], cls:k==='team'?'team':'team '+k, sub:''})),
+    (db.trips||[]).filter(validTrip).map(t => ({pick:'trip:'+t.id, name:t.name, words:t.name+' trip', cls:'trip', sub:tripSummary(t)})),
+    facs.filter(x => !top.includes(x)));
+}
+function drawResults(){
+  const q = daySearch.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = x => (x.name+' '+x.words).toLowerCase();
+  let list = dayCandidates().filter(x => q.every(w => hay(x).includes(w)));
+  // names that start with what's typed come first
+  if(q.length) list = list.filter(x => x.name.toLowerCase().startsWith(q[0])).concat(list.filter(x => !x.name.toLowerCase().startsWith(q[0])));
+  document.getElementById('dayResults').innerHTML = list.length
+    ? list.map(x => `<button type="button" class="pchip ${x.cls}" data-pick="${esc(x.pick)}">${esc(x.name)}${x.sub ? `<span class="sub">${esc(x.sub)}</span>` : ''}</button>`).join('')
+    : '<div class="empty">No matches</div>';
+}
+async function pickForDay(pick){
+  const [k, id] = pick.split(':'), d = sheetDate;
+  const item = k==='fac' ? {kind:'fac', fid:id} : k==='trip' ? {kind:'trip', tid:id} : {kind:k};
+  // A team entry opens its form and a trip spans several days, so the sheet steps aside for those
+  if(k==='team' || k==='trip'){ dayDlg.close(); dropOn(d, item); return; }
+  await dropOn(d, item);
+  if(dayDlg.open) drawDay(false);
+}
+daySearch.addEventListener('input', drawResults);
+daySearch.addEventListener('keydown', e => {
+  if(e.key!=='Enter') return;
+  e.preventDefault();
+  const first = document.querySelector('#dayResults [data-pick]');
+  if(first) pickForDay(first.dataset.pick);
+});
+document.getElementById('dayAddBtn').addEventListener('click', () => { drawDay(true); daySearch.focus(); });
+dayDlg.addEventListener('click', async e => {
+  if(e.target===dayDlg){   // tap on the backdrop (the dialog's own padding also lands here, so check)
+    const r = dayDlg.getBoundingClientRect();
+    if(e.clientX<r.left || e.clientX>r.right || e.clientY<r.top || e.clientY>r.bottom) dayDlg.close();
+    return;
+  }
+  const p = e.target.closest('[data-pick]');
+  if(p){ pickForDay(p.dataset.pick); return; }
+  const b = e.target.closest('[data-day]');
+  if(!b) return;
+  const v = db.visits.find(x => x.id===b.dataset.id);
+  if(!v) return;
+  const facs = dayVisits(sheetDate), i = facs.indexOf(v);
+  switch(b.dataset.day){
+    case 'edit': dayDlg.close(); openVisit(v); return;
+    case 'lock': lockTentative(v); save(); toast('Locked '+visitLabel(v)); break;
+    case 'up': reorder(v.id, facs[i-1].id, false); break;
+    case 'down': reorder(v.id, facs[i+1].id, true); break;
+    case 'remove': await unbook(v.id); break;
+  }
+  if(dayDlg.open) drawDay(!dayEntries(sheetDate).length);
+});
+
 function logRange(){
   const t = parse(today());
   const from = ui.logFrom || iso(new Date(t.getFullYear(), t.getMonth()-1, 1));
@@ -1595,6 +1733,8 @@ function renderTutorial(){
 
 // The app is designed for a computer; on a phone, say so once (per browser) and let them carry on
 const isPhone = () => window.matchMedia('(max-width:760px)').matches;
+// Touch screens can't drag from the palette, so they get the day sheet instead of it
+const touchUi = () => window.matchMedia('(pointer:coarse)').matches;
 function renderBanner(){
   if(!ready) return '';
   let h = '';
@@ -2106,6 +2246,10 @@ document.addEventListener('click', async e => {
     const day = e.target.closest('.day[data-date]');
     if(day){ const p = placing; setPlacing(null); dropOn(day.dataset.date, p); return; }
   }
+  // Day sheet: anywhere on a day with a touch screen; with a mouse, a day's empty space
+  // (its entries keep their own click)
+  const cell = !placing && e.target.closest('.day[data-date]');
+  if(cell && (touchUi() || !e.target.closest('[data-act]'))){ openDay(cell.dataset.date); return; }
   const b = e.target.closest('[data-act],[data-tab]');
   if(!b) return;
   if(b.dataset.tab && !b.dataset.act){ ui.tab = b.dataset.tab; saveUi(); render(); return; }
