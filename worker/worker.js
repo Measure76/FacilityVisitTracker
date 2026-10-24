@@ -392,7 +392,9 @@ function feedIcs(data) {
   (data.facilities || []).forEach(f => { facs[f.id] = f; });
   const endOf = v => (!v.facilityId && v.endDate && v.endDate > v.date) ? v.endDate : v.date;
   const bank = v => !v.facilityId && v.kind === 'bank';
-  const label = v => bank(v) ? 'PTO' : v.facilityId ? (facs[v.facilityId] || { name: '(deleted facility)' }).name : (v.label || 'Other');
+  // A team project across a month change is an acquisition: shown only as "IT Project", without notes
+  const acq = v => !v.facilityId && (!v.kind || v.kind === 'team') && endOf(v).slice(0, 7) !== v.date.slice(0, 7);
+  const label = v => bank(v) ? 'PTO' : acq(v) ? 'IT Project' : v.facilityId ? (facs[v.facilityId] || { name: '(deleted facility)' }).name : (v.label || 'Other');
   const ymd = d => d.replace(/-/g, '');
   const nextDay = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
   const from = new Date(Date.now() - FEED_PAST_DAYS * 86400000).toISOString().slice(0, 10);
@@ -406,7 +408,7 @@ function feedIcs(data) {
       out.push('BEGIN:VEVENT', 'UID:' + v.id + '@facility-visit-tracker', 'DTSTAMP:' + stamp,
         'DTSTART;VALUE=DATE:' + ymd(v.date), 'DTEND;VALUE=DATE:' + ymd(nextDay(endOf(v))), 'SUMMARY:' + icsEsc(label(v)));
       if (f && f.address) out.push('LOCATION:' + icsEsc(f.address));
-      if (v.notes && !bank(v)) out.push('DESCRIPTION:' + icsEsc(v.notes));
+      if (v.notes && !bank(v) && !acq(v)) out.push('DESCRIPTION:' + icsEsc(v.notes));
       out.push('TRANSP:TRANSPARENT', 'END:VEVENT');
     });
   out.push('END:VCALENDAR');

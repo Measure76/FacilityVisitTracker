@@ -1116,7 +1116,10 @@ const ANC_TIP = 'This facility does not need regular visits';
 const KINDS = {team:'Team meeting / project', pto:'PTO', bank:'Bank Day', travel:'Travel Day'};
 const kindOf = v => v.facilityId ? '' : (v.kind || 'team');
 // What managers and facilities see: a Bank Day is just PTO to them
-const outLabel = v => kindOf(v)==='bank' ? 'PTO' : visitLabel(v);
+// A team project that runs across a month change is an acquisition (see bankMonthProblem). Anything
+// that leaves the app calls it just "IT Project" and drops its notes, so no acquisition is named.
+const isAcquisition = v => kindOf(v)==='team' && endOf(v).slice(0,7) !== v.date.slice(0,7);
+const outLabel = v => kindOf(v)==='bank' ? 'PTO' : isAcquisition(v) ? 'IT Project' : visitLabel(v);
 // Bank Days: at most two per calendar month, counting each weekday (not weekends or holidays) an entry covers
 const BANK_LIMIT = 2, BANK_LIMIT_MSG = 'Only two bank days may be used in a calendar month';
 // Bank days are tied to the month they're earned for, so one period can't run into the next month
@@ -1692,7 +1695,7 @@ function renderSettings(){
 
 function renderTutorial(){
   const go = (tab, label) => `<button class="small" data-act="tab" data-tab="${tab}">${label} →</button>`;
-  return `<p class="muted">Four steps to get your tracker set up and keep it current.</p>
+  return `<p class="muted">Four steps to get your tracker set up and keep it current, plus how acquisitions are handled.</p>
     <div class="panel tut">
       <h2>Step 1 · Add your facilities</h2>
       <ul>
@@ -1730,6 +1733,16 @@ function renderTutorial(){
         <li>Fill then keeps the trip together, and dragging the trip onto the calendar, or tapping a gray one, locks every day at once.</li>
       </ul>
       ${go('facilities', 'Facilities')}
+    </div>
+    <div class="panel tut">
+      <h2>Acquisitions and Bank Days</h2>
+      <ul>
+        <li>Put an acquisition on the calendar as a <b>Team meeting / project</b> covering all its days. Don't name the facility or state: the app recognizes an acquisition by its shape, a team project that runs from one month into the next.</li>
+        <li>Outside the app, an acquisition always shows as <b>IT Project</b>: in Copy for email, the calendar download and the phone calendar. Its notes stay in the app. Inside the app it keeps whatever name you gave it.</li>
+        <li>Bank Days earned from an acquisition can only be used in the month it ends, at most two weekdays that month, and each Bank Day entry has to stay within one month. Outside the app, Bank Days show as PTO.</li>
+        <li>A project that starts and ends in the same month counts as a regular team project and goes out under the name you typed, so name it the way you were trained.</li>
+      </ul>
+      ${go('schedule', 'Schedule')}
     </div>`;
 }
 
@@ -1832,7 +1845,7 @@ function icsFile(){
       'DTSTART;VALUE=DATE:'+v.date.replace(/-/g,''), 'DTEND;VALUE=DATE:'+addDays(endOf(v),1).replace(/-/g,''),
       'SUMMARY:'+icsEsc((s.yourName?s.yourName+': ':'')+outLabel(v)+(v.facilityId?' (tentative)':'')));
     if(f && f.address) out.push('LOCATION:'+icsEsc(f.address));
-    if(v.notes && kindOf(v)!=='bank') out.push('DESCRIPTION:'+icsEsc(v.notes));   // Bank Day notes stay private
+    if(v.notes && kindOf(v)!=='bank' && !isAcquisition(v)) out.push('DESCRIPTION:'+icsEsc(v.notes));   // Bank Day and acquisition notes stay private
     out.push('TRANSP:TRANSPARENT','END:VEVENT');
   });
   out.push('END:VCALENDAR');
