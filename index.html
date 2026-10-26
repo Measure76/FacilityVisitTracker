@@ -412,7 +412,7 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
 
 <dialog id="textDlg">
   <h2 id="textTitle">Copy</h2>
-  <p class="muted small">You can edit this before copying.</p>
+  <p class="muted small">You can edit this before copying. Left unedited, it pastes into Outlook with the tentative weeks side by side.</p>
   <p class="warn small" id="textWarn" hidden></p>
   <textarea class="out" id="textOut"></textarea>
   <div class="dlg-actions"><span class="grow"></span>
@@ -1797,26 +1797,62 @@ window.addEventListener('resize', () => { if(ready && document.body.dataset.view
 const mmdd = d => d.slice(5,7)+'/'+d.slice(8,10);
 const mmddSpan = v => endOf(v)===v.date ? mmdd(v.date) : mmdd(v.date)+'-'+mmdd(endOf(v));
 // The email and .ics carry only solid entries, never Fill's tentative ones
-function emailText(){
+// One week of the email: its title and [date, line] rows in date order
+function emailWeeks(){
   const r = emailRange();
   const vs = rangeVisits(r).filter(solid);
-  const lines = [];
+  const weeks = [];
   for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7), we = addDays(ws,7);
-    if(w===1) lines.push('', 'Tentative '+(r.weeks-1)+' week schedule:');
-    if(w>0) lines.push('');
-    lines.push('Week of '+fmt(addDays(ws,1)));
-    const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, '  '+mmddSpan(v)+' – '+outLabel(v)]);
+    const rows = vs.filter(v => overlaps(v, ws, we)).map(v => [v.date, mmddSpan(v)+' – '+outLabel(v)]);
     for(let i=1; i<=5; i++){
       const d = addDays(ws, i), hol = holidayOn(d);
-      if(hol) rows.push([d, '  '+mmdd(d)+' – '+hol+' (holiday)']);
-      else if(officeHappens(d)) rows.push([d, '  '+mmdd(d)+' – Office day']);
+      if(hol) rows.push([d, mmdd(d)+' – '+hol+' (holiday)']);
+      else if(officeHappens(d)) rows.push([d, mmdd(d)+' – Office day']);
     }
     rows.sort((a,b) => a[0].localeCompare(b[0]));
-    if(!rows.length) lines.push('  No visits scheduled');
-    rows.forEach(x => lines.push(x[1]));
+    weeks.push({ws, title:'Week of '+fmt(addDays(ws,1)), rows});
   }
+  return weeks;
+}
+const tentativeTitle = n => 'Tentative '+n+' week schedule:';
+function emailText(){
+  const weeks = emailWeeks(), lines = [];
+  weeks.forEach((wk, w) => {
+    if(w===1) lines.push('', tentativeTitle(weeks.length-1));
+    if(w>0) lines.push('');
+    lines.push(wk.title);
+    if(!wk.rows.length) lines.push('  No visits scheduled');
+    wk.rows.forEach(x => lines.push('  '+x[1]));
+  });
   return lines.join('\n');
+}
+// The same schedule as an Outlook-friendly table: this week on its own, then the tentative
+// weeks two to a row. Paired weeks share a table row per weekday, so Tuesday sits beside Tuesday.
+function emailHtml(){
+  const weeks = emailWeeks();
+  const font = 'font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;';
+  const cell = 'style="'+font+'vertical-align:top;padding:0 32px 0 0"';
+  const head = t => `<b>${esc(t)}</b>`;
+  const lines = wk => wk.rows.length ? wk.rows.map(x => esc(x[1])) : ['No visits scheduled'];
+  // Lines by weekday. A run that started last week counts as Sunday; an empty week says so on Monday.
+  const byDay = wk => {
+    const out = [[],[],[],[],[],[],[]];
+    wk.rows.forEach(x => out[Math.max(0, daysBetween(wk.ws, x[0]))].push(esc(x[1])));
+    if(!wk.rows.length) out[1].push('No visits scheduled');
+    return out;
+  };
+  const pair = (a, b) => {
+    const da = byDay(a), dB = b ? byDay(b) : [[],[],[],[],[],[],[]];
+    let h = `<tr><td ${cell}>${head(a.title)}</td><td ${cell}>${b ? head(b.title) : ''}</td></tr>`;
+    for(let i=0; i<7; i++) if(da[i].length || dB[i].length)
+      h += `<tr><td ${cell}>${da[i].join('<br>')}</td><td ${cell}>${dB[i].join('<br>')}</td></tr>`;
+    return h + `<tr><td ${cell}>&nbsp;</td><td ${cell}></td></tr>`;
+  };
+  let h = `<div style="${font}">${head(weeks[0].title)}<br>${lines(weeks[0]).join('<br>')}<br><br>${esc(tentativeTitle(weeks.length-1))}<br><br></div>`;
+  h += '<table cellspacing="0" cellpadding="0" style="border-collapse:collapse">';
+  for(let w=1; w<weeks.length; w+=2) h += pair(weeks[w], weeks[w+1]);
+  return h + '</table>';
 }
 // We're asked for a 4-week tentative schedule after the current week. Flag any of those
 // weeks that has open visit days but nothing on it yet.
@@ -2063,16 +2099,29 @@ facForm.addEventListener('submit', e => {
   facDlg.close(); save();
 });
 
-function showText(title, text, warning){
+// With html, Copy puts a formatted version on the clipboard too, as long as the text is unedited
+const textCopy = {text:'', html:''};
+function showText(title, text, warning, html){
   document.getElementById('textTitle').textContent = title;
   const w = document.getElementById('textWarn');
   w.textContent = warning || ''; w.hidden = !warning;
   document.getElementById('textOut').value = text;
+  Object.assign(textCopy, {text, html: html || ''});
   document.getElementById('textDlg').showModal();
 }
 async function copy(text){
   try{ await navigator.clipboard.writeText(text); toast('Copied'); }
   catch(e){ toast('Select the text and press Ctrl+C'); }
+}
+async function copyText(){
+  const text = document.getElementById('textOut').value;
+  if(!textCopy.html || text !== textCopy.text || !window.ClipboardItem) return copy(text);
+  try{
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([textCopy.html], {type:'text/html'}),
+      'text/plain': new Blob([text], {type:'text/plain'})})]);
+    toast('Copied');
+  } catch(e){ copy(text); }
 }
 
 // ---------- phone calendar ----------
@@ -2331,8 +2380,8 @@ document.addEventListener('click', async e => {
       }
       break;
     }
-    case 'email-text': showText('Schedule for email', emailText(), emailWarning()); break;
-    case 'copy-text': copy(document.getElementById('textOut').value); break;
+    case 'email-text': showText('Schedule for email', emailText(), emailWarning(), emailHtml()); break;
+    case 'copy-text': copyText(); break;
     case 'ics': download('visit-schedule.ics', icsFile(), 'text/calendar'); break;
     case 'phone-cal': openPhoneCal(); break;
     case 'feed-new':
