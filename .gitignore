@@ -7,3 +7,7 @@ worker/SETUP.md
 
 # Local test secrets for wrangler dev
 .dev.vars
+
+# Claude Code project instructions (local only; the repo is served publicly)
+CLAUDE.md
+.claude/
