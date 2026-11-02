@@ -34,7 +34,7 @@ Each tracker is saved automatically to the team server, so it's available on any
 
 ## Hosting on the Worker
 
-The Worker also serves the app itself at `https://facility-lookup.measure-717.workers.dev/`, for networks that block github.io. `index.html` is bundled into the Worker when it's deployed, so **any change to `index.html` needs `npx wrangler@4 deploy` from the `worker` folder** as well as a push, or the Worker keeps serving the old page. Calls from that page are same-origin, so it needs no `ALLOWED_ORIGINS` entry.
+The Worker also serves the app itself at `https://facility-lookup.measure-717.workers.dev/`, for networks that block github.io. `index.html` is bundled into the Worker when it's deployed, and Workers Builds redeploys it automatically on every push to `main`, so a push updates both copies of the app. If an automatic build fails, run `npx wrangler@4 deploy` from the `worker` folder. Calls from that page are same-origin, so it needs no `ALLOWED_ORIGINS` entry.
 
 ## Hosting on GitHub Pages
 
