@@ -412,7 +412,7 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
 
 <dialog id="textDlg">
   <h2 id="textTitle">Copy</h2>
-  <p class="muted small">You can edit this before copying. Left unedited, it pastes into Outlook with the tentative weeks side by side.</p>
+  <p class="muted small">You can edit this before copying. Left unedited, it pastes into Outlook with the four weeks two to a row.</p>
   <p class="warn small" id="textWarn" hidden></p>
   <textarea class="out" id="textOut"></textarea>
   <div class="dlg-actions"><span class="grow"></span>
@@ -1021,7 +1021,7 @@ function dropStaleTentative(){
   if(db.visits.some(staleTentative)) db.visits = db.visits.filter(v => !staleTentative(v));
 }
 // Fill: clear the tentative entries from tomorrow on and lay suggestions down as new ones
-// through the end of the email's four tentative weeks. Solid entries are never touched.
+// through the end of the email's 4-week schedule. Solid entries are never touched.
 function fillWeeks(){
   const from = addDays(today(), 1), to = emailRange().end;
   db.visits = db.visits.filter(v => !(v.tentative && v.date >= from));
@@ -1255,9 +1255,9 @@ function schedRange(){
   const end = addDays(sundayOf(addDays(addMonths(first, months), -1)), 7);   // exclusive
   return {start, weeks: daysBetween(start, end)/7, end};
 }
-// Copy for email ignores where the calendar is scrolled: this week plus the next four
+// Copy for email ignores where the calendar is scrolled: this week plus the next three
 function emailRange(){
-  const start = sundayOf(today()), weeks = 5;
+  const start = sundayOf(today()), weeks = 4;
   return {start, weeks, end: addDays(start, weeks*7)};
 }
 function rangeVisits(r){
@@ -1271,7 +1271,7 @@ function renderSchedule(){
     <button data-act="sched-move" data-n="1" title="Next month">▶</button>
     <label>Month of<input type="date" id="schedStart" value="${ui.schedMonth || monthOf(today())}"></label>
     <label>Show<select id="schedMonths">${CAL_MONTHS.map(n=>`<option value="${n}" ${n===(ui.calMonths||2)?'selected':''}>${n} month${n>1?'s':''}</option>`).join('')}</select></label>
-    <button data-act="fill" title="Fill the open days through the email's four tentative weeks with gray tentative entries. Solid entries stay put.">Fill next 4 weeks</button>
+    <button data-act="fill" title="Fill the open days through the end of the email's 4-week schedule with gray tentative entries. Solid entries stay put.">Fill next 4 weeks</button>
     ${db.visits.some(v => v.tentative) ? '<button data-act="lock-all" title="Lock every gray entry where it is">Lock all</button>' : ''}
     <span class="grow"></span>
     ${grayInEmail() ? `<span class="small muted">${grayText(grayInEmail())}</span>` : ''}
@@ -1815,26 +1815,24 @@ function emailWeeks(){
   }
   return weeks;
 }
-const tentativeTitle = n => 'Tentative '+n+' week schedule:';
+const emailTitle = n => n+' week schedule. Subject to change.';
 function emailText(){
-  const weeks = emailWeeks(), lines = [];
-  weeks.forEach((wk, w) => {
-    if(w===1) lines.push('', tentativeTitle(weeks.length-1));
-    if(w>0) lines.push('');
-    lines.push(wk.title);
+  const weeks = emailWeeks(), lines = [emailTitle(weeks.length)];
+  weeks.forEach(wk => {
+    lines.push('', wk.title);
     if(!wk.rows.length) lines.push('  No visits scheduled');
     wk.rows.forEach(x => lines.push('  '+x[1]));
   });
   return lines.join('\n');
 }
-// The same schedule as an Outlook-friendly table: this week on its own, then the tentative
-// weeks two to a row. Paired weeks share a table row per weekday, so Tuesday sits beside Tuesday.
+// The same schedule as an Outlook-friendly table: a heading, then the weeks two to a row
+// (this week beside next week, then weeks 3 and 4). Paired weeks share a table row per
+// weekday, so Tuesday sits beside Tuesday.
 function emailHtml(){
   const weeks = emailWeeks();
   const font = 'font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;';
   const cell = 'style="'+font+'vertical-align:top;padding:0 32px 0 0"';
   const head = t => `<b>${esc(t)}</b>`;
-  const lines = wk => wk.rows.length ? wk.rows.map(x => esc(x[1])) : ['No visits scheduled'];
   // Lines by weekday. A run that started last week counts as Sunday; an empty week says so on Monday.
   const byDay = wk => {
     const out = [[],[],[],[],[],[],[]];
@@ -1849,23 +1847,21 @@ function emailHtml(){
       h += `<tr><td ${cell}>${da[i].join('<br>')}</td><td ${cell}>${dB[i].join('<br>')}</td></tr>`;
     return h + `<tr><td ${cell}>&nbsp;</td><td ${cell}></td></tr>`;
   };
-  let h = `<div style="${font}">${head(weeks[0].title)}<br>${lines(weeks[0]).join('<br>')}<br><br>${esc(tentativeTitle(weeks.length-1))}<br><br></div>`;
+  let h = `<div style="${font}">${esc(emailTitle(weeks.length))}<br><br></div>`;
   h += '<table cellspacing="0" cellpadding="0" style="border-collapse:collapse">';
-  for(let w=1; w<weeks.length; w+=2) h += pair(weeks[w], weeks[w+1]);
+  for(let w=0; w<weeks.length; w+=2) h += pair(weeks[w], weeks[w+1]);
   return h + '</table>';
 }
-// We're asked for a 4-week tentative schedule after the current week. Flag any of those
-// weeks that has open visit days but nothing on it yet.
+// Flag any of the email's weeks that has open visit days but nothing solid on it yet
 function emailWarning(){
   const r = emailRange();
   const empty = [];
-  for(let w=1; w<r.weeks; w++){
+  for(let w=0; w<r.weeks; w++){
     const ws = addDays(r.start, w*7);
     if(weekCapacity(ws).avail && !db.visits.some(v => solid(v) && overlaps(v, ws, addDays(ws,7)))) empty.push(fmt(addDays(ws,1),{month:'short',day:'numeric'}));
   }
-  if(r.weeks-1 !== 4) return 'This shows '+(r.weeks-1)+' tentative weeks; 4 are required.';
   const gray = grayInEmail(), grayMsg = gray ? ' '+grayText(gray)+'.' : '';
-  return empty.length ? 'A 4-week tentative schedule is required. Nothing is locked in yet for the week'+(empty.length>1?'s':'')+' of '+empty.join(', ')+'.'+grayMsg : grayMsg.trim();
+  return empty.length ? 'Nothing is locked in yet for the week'+(empty.length>1?'s':'')+' of '+empty.join(', ')+'.'+grayMsg : grayMsg.trim();
 }
 // Gray entries the email would leave out: from today through the end of its weeks
 const grayInEmail = () => db.visits.filter(v => v.tentative && v.date >= today() && v.date < emailRange().end).length;
