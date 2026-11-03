@@ -1402,7 +1402,8 @@ async function bookTrip(t, start){
 }
 // Dragging a trip's bar moves the whole trip by whole weeks, so each day keeps its weekday:
 // the day grabbed lands in the week it's dropped into. Gray entries in the way are cleared;
-// anything solid there stops the move. The moved days are solid, as when a trip is dragged on.
+// anything solid there stays, and the trip's days stack with it (the user sorts that out).
+// The moved days are solid, as when a trip is dragged on.
 async function moveTrip(t, start, from, date){
   const ds = tripDates(t, start), shift = daysBetween(sundayOf(from), sundayOf(date));
   if(!shift || (date >= ds[0] && date <= ds[ds.length-1])) return;   // its own week, or onto itself
@@ -1411,9 +1412,7 @@ async function moveTrip(t, start, from, date){
   const moving = [...new Set(found)], newDays = new Set();
   moving.forEach(v => { for(let d = addDays(v.date, shift); d <= addDays(endOf(v), shift); d = addDays(d, 1)) newDays.add(d); });
   const covers = (v, d) => v.date<=d && endOf(v)>=d;
-  const inWay = db.visits.filter(v => !moving.includes(v) && [...newDays].some(d => covers(v, d)));
-  const blocked = [...newDays].filter(d => inWay.some(v => solid(v) && covers(v, d))).sort();
-  if(blocked.length){ toast('Can’t move '+t.name+': '+blocked.map(fmtDay).join(', ')+(blocked.length>1 ? ' are' : ' is')+' already booked'); return; }
+  const inWay = db.visits.filter(v => v.tentative && !moving.includes(v) && [...newDays].some(d => covers(v, d)));
   const to = ds.map(d => addDays(d, shift));
   const problems = to.map(d => { const why = d < today() ? '' : holidayOn(d) ? 'is '+holidayOn(d) : isOffice(d) ? 'is an office day' : ''; return why ? fmtDay(d)+' '+why : ''; }).filter(Boolean);
   if(problems.length && !await ask(problems.join('\n'), {title:'Move '+t.name+'?', yes:'Move anyway'})) return;
