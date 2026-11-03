@@ -175,7 +175,7 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
 .ev.team.sug{background:none;color:var(--muted)}   /* a tentative Travel Day */
 /* The bar tying a trip's days together; it bleeds across the 1px gaps like a team event's bar */
-.tripbar{margin:3px -5px 0 -4px;padding:0 5px 0 9px;height:15px;background:var(--trip);color:var(--accent-text);font-size:11px;font-weight:600;line-height:15px;overflow:visible;cursor:default}
+.tripbar{margin:3px -5px 0 -4px;padding:0 5px 0 9px;height:15px;background:var(--trip);color:var(--accent-text);font-size:11px;font-weight:600;line-height:15px;overflow:visible;cursor:grab}
 .tripbar .lbl{position:relative;z-index:1;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
 .tripbar.first{margin-left:0;padding-left:5px;border-radius:8px 0 0 8px}
 .tripbar.last{margin-right:0;border-radius:0 8px 8px 0}
@@ -951,13 +951,13 @@ function tripDates(t, start){
 // Trips on the calendar, for the bar that ties their days together. Booked visits don't record
 // which trip they came from, so a trip counts as on the calendar wherever every one of its days
 // has its facility (or Travel Day) on the right date. Moving one away by hand breaks the link.
+const tripDayEntry = (day, d) => db.visits.find(v => day.travel ? kindOf(v)==='travel' && v.date<=d && endOf(v)>=d : v.facilityId===day.fid && v.date===d);
 function tripsOnCalendar(from, to){
   const out = [];
-  const has = (day, d) => db.visits.find(v => day.travel ? kindOf(v)==='travel' && v.date<=d && endOf(v)>=d : v.facilityId===day.fid && v.date===d);
   (db.trips||[]).filter(validTrip).forEach(t => {
     for(let d = from; d < to; d = addDays(d, 1)){
       if(parse(d).getDay()!==t.startDay) continue;
-      const ds = tripDates(t, d), found = t.days.map((day, i) => has(day, ds[i]));
+      const ds = tripDates(t, d), found = t.days.map((day, i) => tripDayEntry(day, ds[i]));
       if(found.every(Boolean)) out.push({t, start:ds[0], end:ds[ds.length-1], tentative:found.some(v => v.tentative)});
     }
   });
@@ -1345,7 +1345,7 @@ function renderCalendar(r){
       const bars = tripRuns.filter(x => x.start<=d && x.end>=d).map(x => {
         const rowEnd = addDays(ws, 6), barEnd = x.end < rowEnd ? x.end : rowEnd;
         const label = x.start===d || (i===0 && x.start<ws) ? `<span class="lbl" data-to="${barEnd}">${esc(x.t.name)}</span>` : '&nbsp;';
-        return `<div class="tripbar${x.start===d?' first':''}${x.end===d?' last':''}${x.tentative?' sug':''}" title="${esc(x.t.name)}${x.tentative?' (tentative)':''} · ${fmt(x.start)} – ${fmt(x.end)}">${label}</div>`;
+        return `<div class="tripbar${x.start===d?' first':''}${x.end===d?' last':''}${x.tentative?' sug':''}" draggable="true" data-drag="tripmove" data-tid="${x.t.id}" data-start="${x.start}" title="${esc(x.t.name)}${x.tentative?' (tentative)':''} · ${fmt(x.start)} – ${fmt(x.end)}. Drag to another week to move the whole trip.">${label}</div>`;
       }).join('');
       const events =vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
         const first = v.date===d, lastDay = endOf(v)===d, labelHere = first || (i===0 && v.date<ws);
@@ -1400,8 +1400,36 @@ async function bookTrip(t, start){
   });
   save(); toast('Booked '+t.name+': '+fmt(ds[0])+' – '+fmt(ds[ds.length-1]));
 }
+// Dragging a trip's bar moves the whole trip by whole weeks, so each day keeps its weekday:
+// the day grabbed lands in the week it's dropped into. Gray entries in the way are cleared;
+// anything solid there stops the move. The moved days are solid, as when a trip is dragged on.
+async function moveTrip(t, start, from, date){
+  const ds = tripDates(t, start), shift = daysBetween(sundayOf(from), sundayOf(date));
+  if(!shift || (date >= ds[0] && date <= ds[ds.length-1])) return;   // its own week, or onto itself
+  const found = t.days.map((day, i) => tripDayEntry(day, ds[i]));
+  if(!found.every(Boolean)) return;
+  const moving = [...new Set(found)], newDays = new Set();
+  moving.forEach(v => { for(let d = addDays(v.date, shift); d <= addDays(endOf(v), shift); d = addDays(d, 1)) newDays.add(d); });
+  const covers = (v, d) => v.date<=d && endOf(v)>=d;
+  const inWay = db.visits.filter(v => !moving.includes(v) && [...newDays].some(d => covers(v, d)));
+  const blocked = [...newDays].filter(d => inWay.some(v => solid(v) && covers(v, d))).sort();
+  if(blocked.length){ toast('Can’t move '+t.name+': '+blocked.map(fmtDay).join(', ')+(blocked.length>1 ? ' are' : ' is')+' already booked'); return; }
+  const to = ds.map(d => addDays(d, shift));
+  const problems = to.map(d => { const why = d < today() ? '' : holidayOn(d) ? 'is '+holidayOn(d) : isOffice(d) ? 'is an office day' : ''; return why ? fmtDay(d)+' '+why : ''; }).filter(Boolean);
+  if(problems.length && !await ask(problems.join('\n'), {title:'Move '+t.name+'?', yes:'Move anyway'})) return;
+  db.visits = db.visits.filter(v => !inWay.includes(v));
+  moving.forEach(v => {
+    const d = addDays(v.date, shift);
+    if(v.facilityId) v.order = nextOrder(d);
+    v.date = d;
+    if(v.endDate) v.endDate = addDays(v.endDate, shift);
+    delete v.tentative; delete v.tripId; delete v.tripStart;
+  });
+  save(); toast('Moved '+t.name+' to '+fmt(to[0])+' – '+fmt(to[to.length-1]));
+}
 async function dropOn(date, item){
   if(item.kind==='trip'){ const t = tripById(item.tid); if(t) bookTrip(t, snapToTripStart(t, date)); return; }
+  if(item.kind==='tripmove'){ const t = tripById(item.tid); if(t) moveTrip(t, item.start, item.from, date); return; }
   if(item.kind==='team'){
     openVisit(null, {facilityId:'', kind:'team', date, endDate:date, status:'planned'});
     return;
@@ -1463,9 +1491,11 @@ document.addEventListener('dragstart', e => {
   const el = e.target.closest && e.target.closest('[data-drag]');
   if(!el) return;
   const k = el.dataset.drag;
-  const item = k==='fac' ? {kind:'fac', fid:el.dataset.fid} : k==='trip' ? {kind:'trip', tid:el.dataset.tid} : KINDS[k] ? {kind:k} : {kind:'visit', id:el.dataset.id};
+  const item = k==='fac' ? {kind:'fac', fid:el.dataset.fid} : k==='trip' ? {kind:'trip', tid:el.dataset.tid}
+    : k==='tripmove' ? {kind:'tripmove', tid:el.dataset.tid, start:el.dataset.start, from:el.closest('.day').dataset.date}
+    : KINDS[k] ? {kind:k} : {kind:'visit', id:el.dataset.id};
   e.dataTransfer.setData('text/plain', JSON.stringify(item));
-  e.dataTransfer.effectAllowed = item.kind==='visit' ? 'move' : 'copy';
+  e.dataTransfer.effectAllowed = item.kind==='visit' || item.kind==='tripmove' ? 'move' : 'copy';
   draggingVisit = item.kind==='visit';
   document.body.classList.toggle('dragging-visit', draggingVisit);
 });
