@@ -303,8 +303,8 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
     <label id="otherWrap">What is it?<input name="label" placeholder="Team meeting, team project, PTO…"></label>
     <label id="endWrap">Last day (for multi-day meetings and projects)<input type="date" name="endDate"></label>
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
-    <div id="bookWrap"><label class="check"><input type="checkbox" name="needsHotel"> Needs hotel</label>
-    <label class="check"><input type="checkbox" name="needsCar"> Needs rental car</label></div>
+    <div id="bookWrap"><label class="check"><input type="checkbox" name="needsHotel" checked> Needs hotel</label>
+    <label class="check"><input type="checkbox" name="needsCar" checked> Needs rental car</label></div>
     <label class="check" id="concurWrap"><input type="checkbox" name="concur"> Entered in Concur</label>
     <div class="dlg-actions">
       <button type="button" class="danger" data-act="delete-visit" id="visitDel">Delete</button>
@@ -988,9 +988,9 @@ function bookBtns(need, got, ref){
   return BOOK_KINDS.filter(k => need[k[0]]).map(k => `<button type="button" class="bk ${got[k[0]]?'yes':'no'}" data-bk="${k[0]}" ${ref} aria-pressed="${!!got[k[0]]}" title="${k[1]}: ${got[k[0]]?'booked':'not booked yet'}. Click to change."><svg aria-hidden="true"><use href="#${k[2]}"/></svg></button>`).join('');
 }
 const bookIcons = x => bookBtns(tripNeeds(x.t), (db.tripBookings||{})[bookKey(x.t.id, x.start)] || {}, `data-tid="${x.t.id}" data-start="${x.start}"`);
-// A Team meeting/project keeps its own flags: needsHotel, needsCar (off unless ticked), hotelBooked, carBooked
+// A Team meeting/project keeps its own flags: needsHotel, needsCar (on unless unticked, stored as false), hotelBooked, carBooked
 const TEAM_FLAGS = {hotel:['needsHotel','hotelBooked'], car:['needsCar','carBooked']};
-const teamBookIcons = v => bookBtns({hotel:v.needsHotel, car:v.needsCar}, {hotel:v.hotelBooked, car:v.carBooked}, `data-vid="${v.id}"`);
+const teamBookIcons = v => bookBtns({hotel:v.needsHotel!==false, car:v.needsCar!==false}, {hotel:v.hotelBooked, car:v.carBooked}, `data-vid="${v.id}"`);
 const tripSummary = t =>DAYS[t.startDay].slice(0,3) + ': ' + t.days.map(x => x.travel ? 'Travel Day' : (fac(x.fid)||{name:'?'}).name).join(' → ');
 const inAnyTrip = fid => (db.trips||[]).some(t => t.days.some(x => x.fid===fid));
 
@@ -1983,8 +1983,8 @@ function openVisit(v, defaults){
   visitForm.endDate.value = d.endDate || '';
   visitForm.notes.value = d.notes || '';
   visitForm.concur.checked = !!d.concur;
-  visitForm.needsHotel.checked = !!d.needsHotel;
-  visitForm.needsCar.checked = !!d.needsCar;
+  visitForm.needsHotel.checked = d.needsHotel!==false;
+  visitForm.needsCar.checked = d.needsCar!==false;
   document.getElementById('visitTitle').textContent = v ? (v.facilityId ? 'Edit entry' : KINDS[kindOf(v)]) : !d.facilityId ? KINDS[newKind] : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
   document.getElementById('visitDel').hidden = !v;
   syncVisitForm();
@@ -2018,8 +2018,8 @@ visitForm.addEventListener('submit', async e => {
   const team = !isFac && (data.kind||'team')==='team';
   const datesChanged = editingVisit && (editingVisit.date!==data.date || endOf(editingVisit)!==endOf(data));
   flags.forEach(([need, got]) => {
-    data[need] = team && f[need].checked || undefined;
-    data[got] = data[need] && editingVisit && editingVisit[got] && !datesChanged || undefined;
+    data[need] = team && !f[need].checked ? false : undefined;   // needed unless unticked
+    data[got] = team && f[need].checked && editingVisit && editingVisit[got] && !datesChanged || undefined;
   });
   if(editingVisit){ Object.assign(editingVisit, data); flags.flat().forEach(n => { if(editingVisit[n]===undefined) delete editingVisit[n]; }); delete editingVisit.locked; lockTentative(editingVisit); }
   else db.visits.push(JSON.parse(JSON.stringify(Object.assign({id:uid()}, data))));
