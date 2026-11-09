@@ -1345,7 +1345,7 @@ function renderCalendar(r){
       const bars = tripRuns.filter(x => x.start<=d && x.end>=d).map(x => {
         const rowEnd = addDays(ws, 6), barEnd = x.end < rowEnd ? x.end : rowEnd;
         const label = x.start===d || (i===0 && x.start<ws) ? `<span class="lbl" data-to="${barEnd}">${esc(x.t.name)}</span>` : '&nbsp;';
-        return `<div class="tripbar${x.start===d?' first':''}${x.end===d?' last':''}${x.tentative?' sug':''}" draggable="true" data-drag="tripmove" data-tid="${x.t.id}" data-start="${x.start}" title="${esc(x.t.name)}${x.tentative?' (tentative)':''} · ${fmt(x.start)} – ${fmt(x.end)}. Drag to another week to move the whole trip.">${label}</div>`;
+        return `<div class="tripbar${x.start===d?' first':''}${x.end===d?' last':''}${x.tentative?' sug':''}" draggable="true" data-drag="tripmove" data-tid="${x.t.id}" data-start="${x.start}" title="${esc(x.t.name)}${x.tentative?' (tentative)':''} · ${fmt(x.start)} – ${fmt(x.end)}.${x.tentative?' Click to lock in all days.':''} Drag to another week to move the whole trip.">${label}</div>`;
       }).join('');
       const events =vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
         const first = v.date===d, lastDay = endOf(v)===d, labelHere = first || (i===0 && v.date<ws);
@@ -1759,7 +1759,7 @@ function renderTutorial(){
       <ul>
         <li>If you visit some facilities together, in the same order, build a trip under <b>Trips</b> at the bottom of the Facilities tab.</li>
         <li>Pick the weekday it usually starts on and add each day in order, including travel days.</li>
-        <li>Fill then keeps the trip together, and dragging the trip onto the calendar, or tapping a gray one, locks every day at once.</li>
+        <li>Fill then keeps the trip together, and dragging the trip onto the calendar, or tapping a gray one (or its gray bar), locks every day at once.</li>
       </ul>
       ${go('facilities', 'Facilities')}
     </div>
@@ -2334,6 +2334,18 @@ document.addEventListener('click', async e => {
   if(placing){
     const day = e.target.closest('.day[data-date]');
     if(day){ const p = placing; setPlacing(null); dropOn(day.dataset.date, p); return; }
+  }
+  // A gray trip bar locks every tentative day of that trip, as locking each day one by one would
+  const bar = !placing && e.target.closest('.tripbar.sug');
+  if(bar){
+    const t = tripById(bar.dataset.tid);
+    if(t){
+      const ds = tripDates(t, bar.dataset.start);
+      const gray = t.days.map((day, i) => tripDayEntry(day, ds[i])).filter(x => x && x.tentative);
+      gray.forEach(lockTentative);
+      save(); toast('Locked '+t.name+' on '+fmtDay(ds[0]));
+    }
+    return;
   }
   // Day sheet: anywhere on a day with a touch screen; with a mouse, a day's empty space
   // (its entries keep their own click)
