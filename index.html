@@ -159,6 +159,7 @@ body.placing .day{cursor:copy}
 .dtag{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .day.holiday .dtag{color:var(--amber);font-weight:600}
 .concur{margin-top:3px;font-size:11px;font-weight:700;color:var(--red);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.concur.triple{color:var(--muted)}
 .ev{display:block;width:100%;margin-top:3px;padding:2px 5px;border:none;border-left:3px solid var(--accent);border-radius:4px;background:var(--blue-bg);color:var(--text);font:inherit;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .ev.done{border-left-color:var(--green);background:var(--green-bg);color:var(--green)}
 .ev.team .lbl{position:relative;z-index:1;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
@@ -930,6 +931,13 @@ function concurDue(ym){
   const date = walk(true);
   return concurCache[ym] = {date, unverified: date !== walk(false)};
 }
+// Triple check is the 3rd business day of each month (weekends and team holidays skipped).
+// A heads-up only: nothing to do in the app.
+const tripleCache = {};
+function tripleCheck(ym){
+  if(ym in tripleCache) return tripleCache[ym];
+  for(let d = ym+'-01', n = 0;; d = addDays(d, 1)) if(!isWeekend(d) && !holidayOn(d) && ++n===3) return tripleCache[ym] = d;
+}
 // Why a facility visit on this day would be unusual, or '' if it's a normal visit day
 function dayProblem(d){
   if(d < today()) return '';   // the past is a record, not a plan: nothing to warn about
@@ -1405,7 +1413,8 @@ function renderCalendar(r){
       const concur = cd.date!==d ? '' : cd.unverified
         ? '<div class="concur" title="Concur expense report due. Unverified: assumes Memorial Day is a Concur holiday.">CONCUR DUE?</div>'
         : '<div class="concur" title="Concur expense report due">CONCUR DUE</div>';
-      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${bars}${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${concur}</div>`;
+      const triple = tripleCheck(d.slice(0,7))!==d ? '' : '<div class="concur triple" title="Triple check: the third business day of the month. Nothing to do here; just a heads-up.">TRIPLE CHECK</div>';
+      h += `<div class="${cls}" data-date="${d}"><span class="dnum">${num}</span>${bars}${events}${tag?`<div class="dtag" title="${esc(tag)}">${esc(tag)}</div>`:''}${visits}${concur}${triple}</div>`;
     }
   }
   return h + '</div></div>';
