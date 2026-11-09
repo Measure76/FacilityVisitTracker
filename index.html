@@ -33,14 +33,14 @@ if(deviceDark){ if(deviceDark.addEventListener) deviceDark.addEventListener('cha
   --bg:#f3f4fa; --panel:#ffffff; --text:#262a3d; --muted:#6c7189; --border:#e3e5f0;
   --accent:#5b6cf0; --accent-text:#ffffff;
   --red:#b42318; --red-bg:#fdeceb; --amber:#8a5a00; --amber-bg:#fff4dc;
-  --green:#257a4d; --green-bg:#e3f6ea; --blue:#4a5ad8; --blue-bg:#eceffe; --gray-bg:#f6f7fb; --pto:#9b6ee8; --bank:#1fa49c; --travel:#ec8a4a; --trip:#8a90ad;
+  --green:#257a4d; --green-bg:#e3f6ea; --blue:#4a5ad8; --blue-bg:#eceffe; --gray-bg:#f6f7fb; --pto:#9b6ee8; --bank:#1fa49c; --travel:#ec8a4a; --trip:#8a90ad; --warn:#f2b441; --ok:#3fbf7a;
   --font:"Nunito",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
 }
 :root[data-theme="dark"]{
   --bg:#101420; --panel:#181d2c; --text:#e8ebf4; --muted:#8e97ad; --border:#283048;
   --accent:#7aa2ff; --accent-text:#0b1020;
   --red:#ff8a80; --red-bg:#3b1f1d; --amber:#f2c065; --amber-bg:#3a3018;
-  --green:#7ee2a8; --green-bg:#173327; --blue:#8fb2ff; --blue-bg:#1f2a48; --gray-bg:#141927; --pto:#a98bf0; --bank:#3fc1b8; --travel:#f0965a; --trip:#596383;
+  --green:#7ee2a8; --green-bg:#173327; --blue:#8fb2ff; --blue-bg:#1f2a48; --gray-bg:#141927; --pto:#a98bf0; --bank:#3fc1b8; --travel:#f0965a; --trip:#596383; --warn:#f2c065; --ok:#7ee2a8;
   --font:"Inter Tight",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   color-scheme:dark;
 }
@@ -175,11 +175,19 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .ev.sug:hover{border-color:var(--muted);color:var(--text)}
 .ev.team.sug{background:none;color:var(--muted)}   /* a tentative Travel Day */
 /* The bar tying a trip's days together; it bleeds across the 1px gaps like a team event's bar */
-.tripbar{margin:3px -5px 0 -4px;padding:0 5px 0 9px;height:15px;background:var(--trip);color:var(--accent-text);font-size:11px;font-weight:600;line-height:15px;overflow:visible;cursor:pointer}
+.tripbar{position:relative;margin:3px -5px 0 -4px;padding:0 5px 0 9px;height:15px;background:var(--trip);color:var(--accent-text);font-size:11px;font-weight:600;line-height:15px;overflow:visible;cursor:pointer}
 .tripbar .lbl{position:relative;z-index:1;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
 .tripbar.first{margin-left:0;padding-left:5px;border-radius:8px 0 0 8px}
 .tripbar.last{margin-right:0;border-radius:0 8px 8px 0}
 .tripbar.first.last{border-radius:8px}
+/* Hotel and car reminders on a locked trip's last day: the icon is the checkbox */
+.tripbar .bks{position:absolute;right:3px;top:1px;z-index:2;display:flex;gap:1px}
+.bk{appearance:none;border:0;padding:0;margin:0;font:inherit;color:inherit;cursor:pointer;display:inline-grid;place-items:center;width:15px;height:13px;border-radius:4px;position:relative;background:transparent}
+.bk svg{width:11px;height:11px}
+.bk.no{background:var(--warn);color:#3a2600}
+.bk.yes{color:var(--accent-text);opacity:.85}
+.bk.yes::after{content:"";position:absolute;right:-2px;bottom:-1px;width:7px;height:7px;border-radius:50%;background:var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cpath d='M1.6 4.2 3.3 5.8 6.4 2.4' fill='none' stroke='%23062' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/100% no-repeat}
+.bk:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .tripbar.sug{background:repeating-linear-gradient(135deg,var(--gray-bg) 0 5px,transparent 5px 10px);box-shadow:inset 0 1px 0 var(--border),inset 0 -1px 0 var(--border);color:var(--muted);font-style:italic}
 .stop{display:inline-block;min-width:14px;margin-right:4px;padding:0 3px;border-radius:7px;background:var(--accent);color:var(--accent-text);font-size:10px;font-weight:700;font-style:normal;line-height:14px;text-align:center}
 .ev.quick{background:none;border:1px solid var(--border);border-left:3px solid var(--accent);color:var(--muted)}
@@ -257,10 +265,15 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
 [data-theme="dark"] .ev.team.sug{color:var(--muted);font-weight:400}
 [data-theme="dark"] .day.today{box-shadow:inset 0 0 0 1px var(--accent),0 0 18px rgba(122,162,255,.25)}
 [data-theme="dark"] .tripbar{color:var(--text)}
+[data-theme="dark"] .bk.yes{color:var(--text)}
 [data-theme="dark"] .dnum{font-weight:500}
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="bed" viewBox="0 0 16 16"><path fill="currentColor" d="M1 3.5a.75.75 0 0 1 1.5 0V9h11.5a1 1 0 0 1 1 1v3a.75.75 0 0 1-1.5 0v-1.5h-11V13A.75.75 0 0 1 1 13zM3.5 6.2a1.6 1.6 0 1 1 3.2 0 1.6 1.6 0 0 1-3.2 0zM7.8 5h4.4A2.3 2.3 0 0 1 14.5 7.3V8H7.8z"/></symbol>
+  <symbol id="car" viewBox="0 0 16 16"><path fill="currentColor" d="M4.2 3.5h7.6c.5 0 .9.3 1.1.7l1.2 3a1.5 1.5 0 0 1 .9 1.4v3.4a.8.8 0 0 1-.8.8h-.9a.8.8 0 0 1-.8-.8V11.5H3.5V12a.8.8 0 0 1-.8.8h-.9A.8.8 0 0 1 1 12V8.6a1.5 1.5 0 0 1 .9-1.4l1.2-3c.2-.4.6-.7 1.1-.7zm.3 1.5-.9 2.2h8.8L11.5 5zM3.6 8.6a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm8.8 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></symbol>
+</svg>
 <div class="wrap">
   <header class="top"><h1>Facility Visit Tracker</h1>
     <div class="top-right"><div id="who" class="small muted"></div>
@@ -336,6 +349,8 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
     <label>Usually starts on<select name="start">
       <option value="1">Monday</option><option value="2" selected>Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option>
     </select></label>
+    <label class="check"><input type="checkbox" name="needsHotel" checked> Needs hotel</label>
+    <label class="check"><input type="checkbox" name="needsCar" checked> Needs rental car</label>
     <div class="small muted" style="margin-bottom:4px">Days, in order (weekends are skipped)</div>
     <div id="tripDays"></div>
     <button type="button" class="small" data-act="trip-add-day">+ Add a day</button>
@@ -448,7 +463,7 @@ const TEAM_KEY = 'facilityVisitTracker.team';        // the company name this br
 function blank(){ return {facilities:[], visits:[], trips:[], settings:{localWeeks:6, remoteWeeks:8, soonDays:14, officeDay:1, yourName:''}}; }
 function normalize(d){
   d = d || {};
-  return {facilities:d.facilities||[], visits:d.visits||[], trips:d.trips||[], settings:Object.assign(blank().settings, d.settings||{})};
+  return {facilities:d.facilities||[], visits:d.visits||[], trips:d.trips||[], tripBookings:d.tripBookings||{}, settings:Object.assign(blank().settings, d.settings||{})};
 }
 function readJson(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
 function writeJson(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
@@ -963,6 +978,14 @@ function tripsOnCalendar(from, to){
   });
   return out;
 }
+// Hotel and car reminders, per run of a trip (trip id + start date); a trip needs both unless it says otherwise
+const bookKey = (tid, start) => tid+'|'+start;
+const tripNeeds = t => ({hotel: t.needsHotel!==false, car: t.needsCar!==false});
+const BOOK_KINDS = [['hotel','Hotel','bed'], ['car','Rental car','car']];
+function bookIcons(x){
+  const need = tripNeeds(x.t), got = (db.tripBookings||{})[bookKey(x.t.id, x.start)] || {};
+  return BOOK_KINDS.filter(k => need[k[0]]).map(k => `<button type="button" class="bk ${got[k[0]]?'yes':'no'}" data-bk="${k[0]}" data-tid="${x.t.id}" data-start="${x.start}" aria-pressed="${!!got[k[0]]}" title="${k[1]}: ${got[k[0]]?'booked':'not booked yet'}. Click to change."><svg aria-hidden="true"><use href="#${k[2]}"/></svg></button>`).join('');
+}
 const tripSummary = t =>DAYS[t.startDay].slice(0,3) + ': ' + t.days.map(x => x.travel ? 'Travel Day' : (fac(x.fid)||{name:'?'}).name).join(' → ');
 const inAnyTrip = fid => (db.trips||[]).some(t => t.days.some(x => x.fid===fid));
 
@@ -1344,8 +1367,10 @@ function renderCalendar(r){
       // One bar across a trip's days, weekends in between included, named where it starts or enters the week
       const bars = tripRuns.filter(x => x.start<=d && x.end>=d).map(x => {
         const rowEnd = addDays(ws, 6), barEnd = x.end < rowEnd ? x.end : rowEnd;
-        const label = x.start===d || (i===0 && x.start<ws) ? `<span class="lbl" data-to="${barEnd}">${esc(x.t.name)}</span>` : '&nbsp;';
-        return `<div class="tripbar${x.start===d?' first':''}${x.end===d?' last':''}${x.tentative?' sug':''}" draggable="true" data-drag="tripmove" data-tid="${x.t.id}" data-start="${x.start}" title="${esc(x.t.name)}${x.tentative?' (tentative)':''} · ${fmt(x.start)} – ${fmt(x.end)}.${x.tentative?' Click to lock in all days.':''} Drag to another week to move the whole trip.">${label}</div>`;
+        const bk = x.end===d && !x.tentative ? bookIcons(x) : '';
+        const nbk = x.tentative ? 0 : bookIcons(x).split('class="bk ').length-1;
+        const label = x.start===d || (i===0 && x.start<ws) ? `<span class="lbl" data-to="${barEnd}"${x.end===barEnd && nbk ? ` data-bk="${nbk}"` : ''}>${esc(x.t.name)}</span>` : '&nbsp;';
+        return `<div class="tripbar${x.start===d?' first':''}${x.end===d?' last':''}${x.tentative?' sug':''}" draggable="true" data-drag="tripmove" data-tid="${x.t.id}" data-start="${x.start}" title="${esc(x.t.name)}${x.tentative?' (tentative)':''} · ${fmt(x.start)} – ${fmt(x.end)}.${x.tentative?' Click to lock in all days.':''} Drag to another week to move the whole trip.">${label}${bk?`<span class="bks">${bk}</span>`:''}</div>`;
       }).join('');
       const events =vs.filter(v => !v.facilityId && v.date<=d && endOf(v)>=d).map(v => {
         const first = v.date===d, lastDay = endOf(v)===d, labelHere = first || (i===0 && v.date<ws);
@@ -1424,6 +1449,8 @@ async function moveTrip(t, start, from, date){
     if(v.endDate) v.endDate = addDays(v.endDate, shift);
     delete v.tentative; delete v.tripId; delete v.tripStart;
   });
+  const bks = db.tripBookings, ok = bookKey(t.id, ds[0]), nk = bookKey(t.id, to[0]);
+  if(bks && bks[ok]){ bks[nk] = bks[ok]; delete bks[ok]; }
   save(); toast('Moved '+t.name+' to '+fmt(to[0])+' – '+fmt(to[to.length-1]));
 }
 async function dropOn(date, item){
@@ -1760,6 +1787,7 @@ function renderTutorial(){
         <li>If you visit some facilities together, in the same order, build a trip under <b>Trips</b> at the bottom of the Facilities tab.</li>
         <li>Pick the weekday it usually starts on and add each day in order, including travel days.</li>
         <li>Fill then keeps the trip together, and dragging the trip onto the calendar, or tapping a gray one (or its gray bar), locks every day at once.</li>
+        <li>Once a trip is locked, small hotel and rental car icons on its bar remind you to book; tap one to check it off.</li>
       </ul>
       ${go('facilities', 'Facilities')}
     </div>
@@ -1816,7 +1844,7 @@ function sizeEventLabels(){
     const last = document.querySelector(`.day[data-date="${lbl.dataset.to}"]`);
     if(!last) return;
     const right = last.getBoundingClientRect().right - 6;
-    lbl.style.width = Math.max(right - lbl.getBoundingClientRect().left, 16) + 'px';
+    lbl.style.width = Math.max(right - (+lbl.dataset.bk||0) * 16 - lbl.getBoundingClientRect().left, 16) + 'px';
   });
 }
 window.addEventListener('resize', () => { if(ready && document.body.dataset.view==='schedule') sizeEventLabels(); });
@@ -2068,6 +2096,8 @@ function openTrip(t){
   editingTrip = t || null;
   tripForm.name.value = t ? t.name : '';
   tripForm.start.value = String(t ? t.startDay : 2);
+  tripForm.needsHotel.checked = !t || t.needsHotel!==false;
+  tripForm.needsCar.checked = !t || t.needsCar!==false;
   tripDraft = t ? t.days.map(x => Object.assign({}, x)) : [{fid: (db.facilities.slice().sort(byName)[0]||{}).id}];
   document.getElementById('tripTitle').textContent = t ? 'Edit trip' : 'Add trip';
   document.getElementById('tripDel').hidden = !t;
@@ -2088,7 +2118,7 @@ tripForm.addEventListener('submit', e => {
   const clash = tripDraft.filter(x => x.fid).map(x => x.fid)
     .map(fid => ({fid, t: (db.trips||[]).find(o => o!==editingTrip && o.days.some(y => y.fid===fid))})).find(c => c.t);
   if(clash){ notify(fac(clash.fid).name+' is already in the trip “'+clash.t.name+'”. A facility can only be in one trip.', 'Already in a trip'); return; }
-  const data = {name, startDay: +tripForm.start.value, days: tripDraft.map(x => x.travel ? {travel:true} : {fid:x.fid})};
+  const data = {name, startDay: +tripForm.start.value, days: tripDraft.map(x => x.travel ? {travel:true} : {fid:x.fid}), needsHotel: tripForm.needsHotel.checked, needsCar: tripForm.needsCar.checked};
   if(!db.trips) db.trips = [];
   if(editingTrip) Object.assign(editingTrip, data); else db.trips.push(Object.assign({id:uid()}, data));
   tripDlg.close(); save();
@@ -2335,6 +2365,17 @@ document.addEventListener('click', async e => {
     const day = e.target.closest('.day[data-date]');
     if(day){ const p = placing; setPlacing(null); dropOn(day.dataset.date, p); return; }
   }
+  // A hotel or car icon on a trip bar only toggles its own check (not the bar, not the day sheet)
+  const bkBtn = e.target.closest('.bk[data-bk]');
+  if(bkBtn){
+    const key = bookKey(bkBtn.dataset.tid, bkBtn.dataset.start);
+    if(!db.tripBookings) db.tripBookings = {};
+    const cur = db.tripBookings[key] || {};
+    cur[bkBtn.dataset.bk] = !cur[bkBtn.dataset.bk];
+    if(cur.hotel || cur.car) db.tripBookings[key] = cur; else delete db.tripBookings[key];
+    save();
+    return;
+  }
   // A gray trip bar locks every tentative day of that trip, as locking each day one by one would
   const bar = !placing && e.target.closest('.tripbar.sug');
   if(bar){
@@ -2390,7 +2431,9 @@ document.addEventListener('click', async e => {
     case 'trip-del-day': tripDraft.splice(+b.dataset.i, 1); renderTripDays(); break;
     case 'delete-trip':
       if(editingTrip && await ask('The facilities stay; only the trip grouping is removed.', {title:'Delete '+editingTrip.name+'?', yes:'Delete', danger:true})){
-        db.trips = db.trips.filter(t => t!==editingTrip); tripDlg.close(); save();
+        db.trips = db.trips.filter(t => t!==editingTrip);
+        Object.keys(db.tripBookings||{}).forEach(k => { if(k.startsWith(editingTrip.id+'|')) delete db.tripBookings[k]; });
+        tripDlg.close(); save();
       }
       break;
     case 'lookup': lookupAddress(); break;
