@@ -182,6 +182,8 @@ button.danger-fill{background:var(--red);border-color:var(--red);color:var(--pan
 .tripbar.first.last{border-radius:8px}
 /* Hotel and car reminders on a locked trip's last day: the icon is the checkbox */
 .tripbar .bks{position:absolute;right:3px;top:1px;z-index:2;display:flex;gap:1px}
+.evw{position:relative}   /* wraps a team bar that has icons (a button can't hold buttons) */
+.evw .bks{position:absolute;right:3px;top:50%;margin-top:-6px;z-index:2;display:flex;gap:1px}
 .bk{appearance:none;border:0;padding:0;margin:0;font:inherit;color:inherit;cursor:pointer;display:inline-grid;place-items:center;width:15px;height:13px;border-radius:4px;position:relative;background:transparent}
 .bk svg{width:11px;height:11px}
 .bk.no{background:var(--warn);color:#3a2600}
@@ -301,6 +303,8 @@ html:not([data-theme="dark"]) .toolbar button{border-radius:999px}
     <label id="otherWrap">What is it?<input name="label" placeholder="Team meeting, team project, PTO…"></label>
     <label id="endWrap">Last day (for multi-day meetings and projects)<input type="date" name="endDate"></label>
     <label>Notes<textarea name="notes" rows="2"></textarea></label>
+    <div id="bookWrap"><label class="check"><input type="checkbox" name="needsHotel"> Needs hotel</label>
+    <label class="check"><input type="checkbox" name="needsCar"> Needs rental car</label></div>
     <label class="check" id="concurWrap"><input type="checkbox" name="concur"> Entered in Concur</label>
     <div class="dlg-actions">
       <button type="button" class="danger" data-act="delete-visit" id="visitDel">Delete</button>
@@ -980,10 +984,13 @@ function tripsOnCalendar(from, to){
 const bookKey = (tid, start) => tid+'|'+start;
 const tripNeeds = t => ({hotel: t.needsHotel!==false, car: t.needsCar!==false});
 const BOOK_KINDS = [['hotel','Hotel','bed'], ['car','Rental car','car']];
-function bookIcons(x){
-  const need = tripNeeds(x.t), got = (db.tripBookings||{})[bookKey(x.t.id, x.start)] || {};
-  return BOOK_KINDS.filter(k => need[k[0]]).map(k => `<button type="button" class="bk ${got[k[0]]?'yes':'no'}" data-bk="${k[0]}" data-tid="${x.t.id}" data-start="${x.start}" aria-pressed="${!!got[k[0]]}" title="${k[1]}: ${got[k[0]]?'booked':'not booked yet'}. Click to change."><svg aria-hidden="true"><use href="#${k[2]}"/></svg></button>`).join('');
+function bookBtns(need, got, ref){
+  return BOOK_KINDS.filter(k => need[k[0]]).map(k => `<button type="button" class="bk ${got[k[0]]?'yes':'no'}" data-bk="${k[0]}" ${ref} aria-pressed="${!!got[k[0]]}" title="${k[1]}: ${got[k[0]]?'booked':'not booked yet'}. Click to change."><svg aria-hidden="true"><use href="#${k[2]}"/></svg></button>`).join('');
 }
+const bookIcons = x => bookBtns(tripNeeds(x.t), (db.tripBookings||{})[bookKey(x.t.id, x.start)] || {}, `data-tid="${x.t.id}" data-start="${x.start}"`);
+// A Team meeting/project keeps its own flags: needsHotel, needsCar (off unless ticked), hotelBooked, carBooked
+const TEAM_FLAGS = {hotel:['needsHotel','hotelBooked'], car:['needsCar','carBooked']};
+const teamBookIcons = v => bookBtns({hotel:v.needsHotel, car:v.needsCar}, {hotel:v.hotelBooked, car:v.carBooked}, `data-vid="${v.id}"`);
 const tripSummary = t =>DAYS[t.startDay].slice(0,3) + ': ' + t.days.map(x => x.travel ? 'Travel Day' : (fac(x.fid)||{name:'?'}).name).join(' → ');
 const inAnyTrip = fid => (db.trips||[]).some(t => t.days.some(x => x.fid===fid));
 
@@ -1374,10 +1381,13 @@ function renderCalendar(r){
         const first = v.date===d, lastDay = endOf(v)===d, labelHere = first || (i===0 && v.date<ws);
         // The name sits in the bar's first cell this week and runs across to the bar's last cell (see sizeEventLabels)
         const rowEnd = addDays(ws, 6), barEnd = endOf(v) < rowEnd ? endOf(v) : rowEnd;
-        const label = labelHere ? `<span class="lbl" data-to="${barEnd}">${esc(visitLabel(v))}</span>` : '&nbsp;';
-        return v.tentative
+        const tbk = lastDay && !v.tentative && kindOf(v)==='team' ? teamBookIcons(v) : '';
+        const ntbk = v.tentative || kindOf(v)!=='team' ? 0 : teamBookIcons(v).split('class="bk ').length-1;
+        const label = labelHere ? `<span class="lbl" data-to="${barEnd}"${endOf(v)===barEnd && ntbk ? ` data-bk="${ntbk}"` : ''}>${esc(visitLabel(v))}</span>` : '&nbsp;';
+        const bar = v.tentative
           ? `<button class="ev team sug ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="lock" title="Tentative ${esc(visitLabel(v))}${v.tripId ? ' on '+esc((tripById(v.tripId)||{name:'a trip'}).name)+'. Click to lock the whole trip.' : '. Click to lock it.'}">${label}</button>`
           : `<button class="ev team ${kindOf(v)}${first?' first':''}${lastDay?' last':''}" draggable="true" data-drag="visit" data-id="${v.id}" data-act="edit-visit" title="${esc(visitLabel(v)+' · '+whenText(v))}">${label}</button>`;
+        return tbk ? `<div class="evw">${bar}<span class="bks">${tbk}</span></div>` : bar;
       }).join('');
       const visits = vs.filter(v => v.facilityId && v.date===d).map(v => {
         const f = fac(v.facilityId), fly = f&&f.type==='remote'?' ✈':'', n = stopOf(v, true), quick = isQuickStop(v, rot);
@@ -1489,6 +1499,7 @@ async function dropOn(date, item){
       v.date = moved.date;
       v.endDate = moved.endDate;
       delete v.tripId; delete v.tripStart; delete v.tentative;
+      delete v.hotelBooked; delete v.carBooked;   // new dates, so the bookings may need redoing
     }
     save(); toast('Moved to '+fmtDay(date));
     return;
@@ -1957,6 +1968,7 @@ function syncVisitForm(){
   const other = visitForm.facilityId.value==='';
   document.getElementById('otherWrap').hidden = !other;
   document.getElementById('endWrap').hidden = !other;
+  document.getElementById('bookWrap').hidden = !(other && (editingVisit ? kindOf(editingVisit)||'team' : newKind)==='team');
   document.getElementById('concurWrap').hidden = other || !(visitForm.date.value && visitForm.date.value <= today());
 }
 function openVisit(v, defaults){
@@ -1971,6 +1983,8 @@ function openVisit(v, defaults){
   visitForm.endDate.value = d.endDate || '';
   visitForm.notes.value = d.notes || '';
   visitForm.concur.checked = !!d.concur;
+  visitForm.needsHotel.checked = !!d.needsHotel;
+  visitForm.needsCar.checked = !!d.needsCar;
   document.getElementById('visitTitle').textContent = v ? (v.facilityId ? 'Edit entry' : KINDS[kindOf(v)]) : !d.facilityId ? KINDS[newKind] : d.status==='completed' ? 'Log a completed visit' : 'Plan a visit';
   document.getElementById('visitDel').hidden = !v;
   syncVisitForm();
@@ -1999,8 +2013,16 @@ visitForm.addEventListener('submit', async e => {
   const why = data.kind==='bank' && (!editingVisit || editingVisit.date.slice(0,7)!==data.date.slice(0,7)) && bankMonthProblem(data);
   if(why){ notify(why, 'Bank Day'); return; }
   if(data.kind==='bank' && !bankLimitOk(Object.assign({id: editingVisit ? editingVisit.id : 'new'}, data))){ notify(BANK_LIMIT_MSG, 'Bank Day limit'); return; }
-  if(editingVisit){ Object.assign(editingVisit, data); delete editingVisit.locked; lockTentative(editingVisit); }
-  else db.visits.push(Object.assign({id:uid()}, data));
+  // Hotel and car reminders belong to Team meeting/project entries; new dates clear the booked checks
+  const flags = Object.values(TEAM_FLAGS);
+  const team = !isFac && (data.kind||'team')==='team';
+  const datesChanged = editingVisit && (editingVisit.date!==data.date || endOf(editingVisit)!==endOf(data));
+  flags.forEach(([need, got]) => {
+    data[need] = team && f[need].checked || undefined;
+    data[got] = data[need] && editingVisit && editingVisit[got] && !datesChanged || undefined;
+  });
+  if(editingVisit){ Object.assign(editingVisit, data); flags.flat().forEach(n => { if(editingVisit[n]===undefined) delete editingVisit[n]; }); delete editingVisit.locked; lockTentative(editingVisit); }
+  else db.visits.push(JSON.parse(JSON.stringify(Object.assign({id:uid()}, data))));
   visitDlg.close(); save();
 });
 
@@ -2366,6 +2388,11 @@ document.addEventListener('click', async e => {
   // A hotel or car icon on a trip bar only toggles its own check (not the bar, not the day sheet)
   const bkBtn = e.target.closest('.bk[data-bk]');
   if(bkBtn){
+    if(bkBtn.dataset.vid){
+      const v = db.visits.find(x => x.id===bkBtn.dataset.vid), f = TEAM_FLAGS[bkBtn.dataset.bk][1];
+      if(v){ if(v[f]) delete v[f]; else v[f] = true; save(); }
+      return;
+    }
     const key = bookKey(bkBtn.dataset.tid, bkBtn.dataset.start);
     if(!db.tripBookings) db.tripBookings = {};
     const cur = db.tripBookings[key] || {};
