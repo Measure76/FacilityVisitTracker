@@ -1449,8 +1449,8 @@ async function moveTrip(t, start, from, date){
     if(v.endDate) v.endDate = addDays(v.endDate, shift);
     delete v.tentative; delete v.tripId; delete v.tripStart;
   });
-  const bks = db.tripBookings, ok = bookKey(t.id, ds[0]), nk = bookKey(t.id, to[0]);
-  if(bks && bks[ok]){ bks[nk] = bks[ok]; delete bks[ok]; }
+  // New dates mean the hotel and car may need booking again, so a moved trip starts unchecked
+  if(db.tripBookings) delete db.tripBookings[bookKey(t.id, ds[0])];
   save(); toast('Moved '+t.name+' to '+fmt(to[0])+' – '+fmt(to[to.length-1]));
 }
 async function dropOn(date, item){
