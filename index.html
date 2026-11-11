@@ -585,6 +585,21 @@ async function loadUser(){
   else{ db = normalize(server.data); sync.version = server.version; writeCache(); }
   ready = true; render(); setSync(sync.dirty ? 'saving' : 'saved');
 }
+// Reload the whole page (new app version and fresh data). Unsaved edits are saved first; if the
+// server can't be reached they stay in this browser's cache and loadUser() saves them on the next load.
+let reloading = false;
+async function refreshPage(){
+  if(sync.dirty || sync.inflight){
+    if(sync.state!=='offline'){
+      toast('Saving first…'); clearTimeout(sync.timer); push();
+      while((sync.dirty || sync.inflight) && sync.state!=='offline' && session.token) await new Promise(r => setTimeout(r, 200));
+    }
+    if(!session.token) return;   // signed out meanwhile
+    if((sync.dirty || sync.inflight) && !await ask('Some changes haven’t reached the server yet. They stay in this browser and will save once you’re back online.', {title:'Refresh anyway?', yes:'Refresh'})) return;
+  }
+  reloading = true;
+  location.reload();
+}
 // Pick up changes made on another device when this tab comes back into view
 async function refreshFromServer(){
   if(!ready || sync.dirty || sync.inflight || document.querySelector('dialog[open]')) return;
@@ -1837,7 +1852,7 @@ function render(){
   if(!ready) return;
   dropStaleTentative();
   document.body.classList.remove('signed-out');
-  document.getElementById('who').innerHTML = `${esc(session.name||session.eeid)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="sign-out">Sign out</button>`;
+  document.getElementById('who').innerHTML = `${esc(session.name||session.eeid)} · <span id="syncState">${syncLabel()}</span> · <button class="linkish" data-act="refresh-page" title="Reload the page to pick up the latest version">Refresh</button> · <button class="linkish" data-act="sign-out">Sign out</button>`;
   document.querySelector('#tabs [data-tab=admin]').hidden = !session.admin;
   let tab = ui.tab || (db.facilities.length ? 'schedule' : 'tutorial');
   if(tab==='admin' && !session.admin) tab = 'schedule';
@@ -2511,6 +2526,7 @@ document.addEventListener('click', async e => {
     case 'retry-push': clearTimeout(sync.retry); push(); break;
     case 'desktop-noted': ui.desktopNoted = true; saveUi(); document.getElementById('banner').innerHTML = renderBanner(); break;
     case 'retry-load': loadUser(); break;
+    case 'refresh-page': refreshPage(); break;
     case 'sign-out': signOut(false); break;
     case 'sign-out-all': signOut(true); break;
     case 'change-pin': pinForm.reset(); document.getElementById('pinMsg').textContent = ''; pinDlg.showModal(); break;
@@ -2558,7 +2574,7 @@ document.getElementById('importFile').addEventListener('change', e => {
 
 window.addEventListener('online', () => { if(sync.dirty) push(); });
 document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshFromServer(); });
-window.addEventListener('beforeunload', e => { if(sync.dirty){ e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if(sync.dirty && !reloading){ e.preventDefault(); e.returnValue = ''; } });
 
 if(session.token) loadUser(); else showSignIn();
 </script>
